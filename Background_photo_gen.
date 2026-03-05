@@ -1,0 +1,629 @@
+"""
+Visual Font Showcase Generator — Minimal Text, Maximum Beauty
+=============================================================
+Inspired by editorial type foundry aesthetics:
+  - Videodrome / horror movie poster energy
+  - Book cover typography as art
+  - Pure letterform geometry
+  - Brutalist editorial spreads
+  - Ink & paper textures
+
+SETUP:  pip install Pillow numpy
+USAGE:  Drop fonts into ./fonts/, run script, find results in ./showcases/
+"""
+
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance, ImageChops
+from pathlib import Path
+import random, math, colorsys, sys
+import numpy as np
+
+# ═══════════════════════════════════════════════════════════════════
+try:
+    SCRIPT_DIR = Path(__file__).parent
+except NameError:
+    SCRIPT_DIR = Path.cwd()
+
+FONT_DIR   = SCRIPT_DIR / "fonts"
+OUTPUT_DIR = SCRIPT_DIR / "showcases"
+CARD_W, CARD_H = 1200, 800
+FONT_DIR.mkdir(exist_ok=True)
+OUTPUT_DIR.mkdir(exist_ok=True)
+# ═══════════════════════════════════════════════════════════════════
+
+# ── SHORT SPECIMEN STRINGS (minimal text philosophy) ─────────────
+HERO_SINGLE  = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+HERO_PAIRS   = ["Aa","Bb","Gg","Rr","Qq","Ww","Mm","Hh","Kk","Pp"]
+HERO_SHORT   = ["Ag","Rg","Gy","Hm","Oo","Bd"]
+NUMBERS      = ["0123456789","1234","567890","1 2 3","42","100"]
+PUNCHY_WORDS = ["FORM","BOLD","PURE","EDIT","TYPE","MAKE","SANS","SLAB","NEUE","GRSK"]
+ALPHABET_STR = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+ALPHA_LOWER  = "abcdefghijklmnopqrstuvwxyz"
+
+# ── COLOUR SYSTEMS ───────────────────────────────────────────────
+PALETTES = [
+    {"bg":(8,8,10),        "fg":(245,242,235), "a1":(255,60,40),   "a2":(255,200,0),  "dim":(50,48,55)},   # noir red
+    {"bg":(252,248,238),   "fg":(12,10,8),     "a1":(200,40,20),   "a2":(180,140,80), "dim":(200,195,180)}, # aged paper
+    {"bg":(15,25,40),      "fg":(210,228,255), "a1":(80,160,255),  "a2":(0,200,180),  "dim":(40,60,90)},    # deep blue
+    {"bg":(240,235,220),   "fg":(25,20,12),    "a1":(0,0,0),       "a2":(160,100,40), "dim":(185,178,160)}, # natural cream
+    {"bg":(5,5,5),         "fg":(250,250,250), "a1":(0,255,120),   "a2":(200,255,0),  "dim":(30,30,30)},    # neon black
+    {"bg":(35,12,8),       "fg":(255,235,200), "a1":(220,80,30),   "a2":(255,200,60), "dim":(70,28,18)},    # ember
+    {"bg":(240,240,245),   "fg":(10,10,20),    "a1":(80,0,200),    "a2":(200,0,150),  "dim":(190,188,200)}, # lavender
+    {"bg":(8,30,20),       "fg":(200,245,215), "a1":(0,220,100),   "a2":(180,255,80), "dim":(20,60,38)},    # jungle
+    {"bg":(255,250,240),   "fg":(10,8,5),      "a1":(180,30,0),    "a2":(255,160,0),  "dim":(220,215,200)}, # warm white
+    {"bg":(20,18,30),      "fg":(235,230,255), "a1":(180,100,255), "a2":(255,80,200), "dim":(45,40,65)},    # violet night
+    {"bg":(0,0,0),         "fg":(255,255,255), "a1":(255,255,255), "a2":(180,180,180),"dim":(20,20,20)},    # pure bw
+    {"bg":(230,220,200),   "fg":(30,25,15),    "a1":(0,80,60),     "a2":(180,120,40), "dim":(195,185,165)}, # parchment
+    {"bg":(255,240,230),   "fg":(30,15,10),    "a1":(220,60,40),   "a2":(255,140,0),  "dim":(230,210,195)}, # terracotta
+    {"bg":(10,12,18),      "fg":(220,225,240), "a1":(255,120,0),   "a2":(255,200,80), "dim":(25,28,40)},    # space orange
+]
+
+# ── CORE HELPERS ─────────────────────────────────────────────────
+def lf(path, size):
+    try: return ImageFont.truetype(str(path), max(1,size))
+    except: return ImageFont.load_default()
+
+def bb(draw, text, font):
+    r = draw.textbbox((0,0), text, font=font)
+    return r[2]-r[0], r[3]-r[1]
+
+def cxy(W,H,tw,th): return (W-tw)//2, (H-th)//2
+
+def noise(img, s=6):
+    a = np.array(img).astype(np.int16)
+    a = np.clip(a + np.random.randint(-s,s,a.shape), 0, 255).astype(np.uint8)
+    return Image.fromarray(a)
+
+def grain_overlay(img, strength=0.04):
+    arr = np.array(img).astype(np.float32)
+    g = np.random.randn(*arr.shape[:2]) * 255 * strength
+    arr[:,:,0] = np.clip(arr[:,:,0]+g, 0, 255)
+    arr[:,:,1] = np.clip(arr[:,:,1]+g, 0, 255)
+    arr[:,:,2] = np.clip(arr[:,:,2]+g, 0, 255)
+    return Image.fromarray(arr.astype(np.uint8))
+
+def vignette(img, strength=0.5):
+    W,H = img.size
+    arr = np.array(img).astype(np.float32)
+    cx,cy = W/2, H/2
+    Y,X = np.ogrid[:H,:W]
+    dist = np.sqrt(((X-cx)/cx)**2 + ((Y-cy)/cy)**2)
+    mask = 1 - np.clip(dist*strength, 0, 1)*0.6
+    for c in range(3): arr[:,:,c] *= mask
+    return Image.fromarray(np.clip(arr,0,255).astype(np.uint8))
+
+def scanlines(img, gap=4, alpha=30):
+    W,H = img.size
+    ov = Image.new("RGBA",(W,H),(0,0,0,0))
+    d = ImageDraw.Draw(ov)
+    for y in range(0,H,gap): d.line([(0,y),(W,y)],fill=(0,0,0,alpha))
+    return Image.alpha_composite(img.convert("RGBA"),ov).convert("RGB")
+
+def halftone_circle(draw, cx, cy, r, col, dots=8):
+    for i in range(dots):
+        a = 2*math.pi*i/dots
+        x,y = cx+r*math.cos(a), cy+r*math.sin(a)
+        dr = max(2, r//6)
+        draw.ellipse([x-dr,y-dr,x+dr,y+dr], fill=col)
+
+def draw_rule(draw,x1,y1,x2,y2,col,w=1):
+    draw.line([(x1,y1),(x2,y2)],fill=col,width=w)
+
+def font_name(path): return Path(path).stem.replace("-"," ").replace("_"," ")
+
+def fit_to_width(fp, text, max_w, start_size=400, min_size=12):
+    tmp = Image.new("RGB",(max_w*2,400))
+    d = ImageDraw.Draw(tmp)
+    s = start_size
+    while s >= min_size:
+        f = lf(fp,s); w,_ = bb(d,text,f)
+        if w <= max_w: return f, s
+        s -= max(1, s//20)
+    return lf(fp,min_size), min_size
+
+
+# ══════════════════════════════════════════════════════════════════
+#  18 VISUAL LAYOUT TEMPLATES
+# ══════════════════════════════════════════════════════════════════
+
+def layout_single_letter_hero(fp, pal, W, H):
+    """One massive letter fills the entire card — pure letterform study."""
+    img = Image.new("RGB",(W,H), pal["bg"])
+    ch = random.choice(list("ABCDEFGHJKMNPQRSTUVWXYZ"))
+    f, sz = fit_to_width(fp, ch, int(W*0.92), 800)
+    d = ImageDraw.Draw(img)
+    tw,th = bb(d,ch,f)
+    x,y = cxy(W,H,tw,th)
+    # Ghost echo
+    echo_f = lf(fp, int(sz*1.05))
+    etw,eth = bb(d,ch,echo_f)
+    ex,ey = cxy(W,H,etw,eth)
+    d.text((ex+6,ey+6), ch, font=echo_f, fill=(*pal["a1"][:3],30))
+    # Main letter
+    d.text((x,y), ch, font=f, fill=pal["fg"])
+    # Thin accent line
+    draw_rule(d, 0, H-6, W, H-6, pal["a1"], 4)
+    img = grain_overlay(img)
+    return img
+
+def layout_two_letter_contrast(fp, pal, W, H):
+    """Uppercase vs lowercase of same letter — dramatic size contrast."""
+    img = Image.new("RGB",(W,H), pal["bg"])
+    d = ImageDraw.Draw(img)
+    pair = random.choice(HERO_PAIRS)
+    upper, lower = pair[0], pair[1]
+    # Big uppercase left
+    fu, su = fit_to_width(fp, upper, int(W*0.52), 700)
+    twu,thu = bb(d,upper,fu)
+    d.text((int(W*0.04), (H-thu)//2), upper, font=fu, fill=pal["fg"])
+    # Small lowercase right, vertically centred
+    fl, sl = fit_to_width(fp, lower, int(W*0.38), 500)
+    twl,thl = bb(d,lower,fl)
+    d.text((int(W*0.54), (H-thl)//2), lower, font=fl, fill=pal["a1"])
+    # Vertical divider
+    draw_rule(d, W//2, 40, W//2, H-40, pal["dim"], 2)
+    img = grain_overlay(img, 0.03)
+    return img
+
+def layout_alphabet_arc(fp, pal, W, H):
+    """Letters arranged along a sweeping arc."""
+    img = Image.new("RGB",(W,H), pal["bg"])
+    d = ImageDraw.Draw(img)
+    letters = ALPHABET_STR[:18]
+    f = lf(fp, 52)
+    cx,cy = W//2, H+120
+    r = H+80
+    span = math.radians(58)
+    start = -math.pi/2 - span/2
+    for i,ch in enumerate(letters):
+        t = i/(len(letters)-1)
+        a = start + t*span
+        x = int(cx + r*math.cos(a))
+        y = int(cy + r*math.sin(a))
+        cw,ch2 = bb(d,ch,f)
+        col = pal["fg"] if i%3!=1 else pal["a1"]
+        tmp2 = Image.new("RGBA",(W,H),(0,0,0,0))
+        ImageDraw.Draw(tmp2).text((W//2-cw//2, H//2-ch2//2-r+20), ch, font=f, fill=(*col,230))
+        rot = tmp2.rotate(-math.degrees(a), resample=Image.BICUBIC, center=(W//2,H//2))
+        img.paste(Image.alpha_composite(img.convert("RGBA"),rot).convert("RGB"))
+    img = grain_overlay(img)
+    return img
+
+def layout_poster_fill(fp, pal, W, H):
+    """Text bleeds edge to edge — full bleed poster energy like 'Twilight of Briareus'."""
+    img = Image.new("RGB",(W,H), pal["bg"])
+    d = ImageDraw.Draw(img)
+    word = random.choice(PUNCHY_WORDS + ["NEUE","GRSK","TYPE","BOLD","FORM","SANS"])
+    # Fill width exactly
+    f, sz = fit_to_width(fp, word, W-20, 600)
+    tw,th = bb(d,word,f)
+    # Stack 3 times at slight offsets for depth
+    offsets = [(8,8,(*pal["a1"][:3],15)), (3,3,(*pal["a1"][:3],25)), (0,0,(*pal["fg"][:3],255))]
+    y = (H-th)//2
+    for ox,oy,col in offsets:
+        d.text(((W-tw)//2+ox, y+oy), word, font=f, fill=col)
+    # Bold horizontal rules
+    draw_rule(d, 0, y-16, W, y-16, pal["a1"], 5)
+    draw_rule(d, 0, y+th+12, W, y+th+12, pal["a1"], 5)
+    img = grain_overlay(img, 0.05)
+    return img
+
+def layout_grid_letters(fp, pal, W, H):
+    """Letters in a tight grid — like a stamp sheet or periodic table."""
+    img = Image.new("RGB",(W,H), pal["bg"])
+    d = ImageDraw.Draw(img)
+    cols, rows = 6, 4
+    cw, rh = W//cols, H//rows
+    letters = list(ALPHABET_STR)
+    random.shuffle(letters)
+    f = lf(fp, int(min(cw,rh)*0.55))
+    for row in range(rows):
+        for col in range(cols):
+            idx = row*cols+col
+            if idx >= len(letters): break
+            ch = letters[idx]
+            x = col*cw; y = row*rh
+            # Alternating background tile
+            if (row+col)%2==0:
+                d.rectangle([x,y,x+cw-2,y+rh-2], fill=pal["dim"])
+            tw2,th2 = bb(d,ch,f)
+            col_c = pal["a1"] if (row+col)%3==0 else pal["fg"]
+            d.text((x+(cw-tw2)//2, y+(rh-th2)//2), ch, font=f, fill=col_c)
+    img = grain_overlay(img, 0.02)
+    return img
+
+def layout_split_color_letter(fp, pal, W, H):
+    """One giant letter split diagonally — two colours."""
+    img = Image.new("RGB",(W,H), pal["bg"])
+    ch = random.choice(list("ABCDEFGHJKMNPQRSTVW"))
+    f, sz = fit_to_width(fp, ch, int(W*0.85), 700)
+    d = ImageDraw.Draw(img)
+    tw,th = bb(d,ch,f)
+    x,y = cxy(W,H,tw,th)
+    # Draw letter in fg
+    layer1 = Image.new("RGB",(W,H), pal["bg"])
+    d1 = ImageDraw.Draw(layer1); d1.text((x,y), ch, font=f, fill=pal["fg"])
+    # Draw letter in accent
+    layer2 = Image.new("RGB",(W,H), pal["bg"])
+    d2 = ImageDraw.Draw(layer2); d2.text((x,y), ch, font=f, fill=pal["a1"])
+    # Diagonal split mask
+    mask = Image.new("L",(W,H),0)
+    md = ImageDraw.Draw(mask)
+    md.polygon([(0,0),(W,0),(W,H)], fill=255)
+    result = Image.composite(layer2, layer1, mask)
+    # Diagonal line
+    draw_rule(ImageDraw.Draw(result), 0,0, W,H, pal["a2"], 3)
+    return grain_overlay(result)
+
+def layout_number_mono(fp, pal, W, H):
+    """Numbers as graphic composition — like a Swiss typographic poster."""
+    img = Image.new("RGB",(W,H), pal["bg"])
+    d = ImageDraw.Draw(img)
+    # Large number background
+    n_big = str(random.randint(1,9))
+    f_bg, _ = fit_to_width(fp, n_big, int(W*0.7), 700)
+    tw,th = bb(d,n_big,f_bg)
+    x,y = cxy(W,H,tw,th)
+    d.text((x+10,y+10), n_big, font=f_bg, fill=(*pal["dim"][:3],180))
+    d.text((x,y), n_big, font=f_bg, fill=pal["fg"])
+    # Small numbers running vertically right side
+    f_sm = lf(fp,28)
+    for i,n in enumerate("0123456789"):
+        xi = W-70; yi = 40 + i*((H-80)//10)
+        col = pal["a1"] if n==n_big else pal["dim"]
+        d.text((xi,yi), n, font=f_sm, fill=col)
+    # Horizontal rule at golden ratio
+    draw_rule(d, 40, int(H*0.618), W-40, int(H*0.618), pal["a1"], 2)
+    img = grain_overlay(img, 0.04)
+    return img
+
+def layout_diagonal_sweep(fp, pal, W, H):
+    """Text at dramatic angle — Bordonaro Vampire energy."""
+    img = Image.new("RGB",(W,H), pal["bg"])
+    word = random.choice(PUNCHY_WORDS)
+    f, sz = fit_to_width(fp, word, int(W*1.1), 600)
+    tmp = Image.new("RGBA",(W*2,H*2),(0,0,0,0))
+    d = ImageDraw.Draw(tmp)
+    tw,th = bb(d,word,f)
+    # Shadow
+    d.text((tmp.width//2-tw//2+6, tmp.height//2-th//2+6), word, font=f, fill=(*pal["a1"][:3],40))
+    d.text((tmp.width//2-tw//2, tmp.height//2-th//2), word, font=f, fill=(*pal["fg"][:3],255))
+    rot = tmp.rotate(random.choice([-35,-25,-20,20,25,35]), resample=Image.BICUBIC)
+    ox = (rot.width-W)//2; oy = (rot.height-H)//2
+    base = Image.new("RGB",(W,H),pal["bg"])
+    crop = rot.crop((ox,oy,ox+W,oy+H))
+    base.paste(Image.alpha_composite(base.convert("RGBA"),crop).convert("RGB"))
+    # Accent lines
+    d2 = ImageDraw.Draw(base)
+    draw_rule(d2, 0, 8, W, 8, pal["a1"], 4)
+    draw_rule(d2, 0, H-8, W, H-8, pal["a1"], 4)
+    return grain_overlay(base, 0.05)
+
+def layout_concentric_letters(fp, pal, W, H):
+    """Same letter repeated at increasing sizes from centre — ripple effect."""
+    img = Image.new("RGB",(W,H), pal["bg"])
+    d = ImageDraw.Draw(img)
+    ch = random.choice(list("ABCDEFGHJKMOQRSTW"))
+    cx,cy = W//2, H//2
+    sizes = [18,30,48,72,100,140,190,250,340]
+    for i,sz in enumerate(sizes):
+        f = lf(fp,sz); tw,th = bb(d,ch,f)
+        t = i/(len(sizes)-1)
+        # Interpolate from dim to fg
+        r = int(pal["dim"][0]*(1-t)+pal["fg"][0]*t)
+        g = int(pal["dim"][1]*(1-t)+pal["fg"][1]*t)
+        b = int(pal["dim"][2]*(1-t)+pal["fg"][2]*t)
+        d.text((cx-tw//2, cy-th//2), ch, font=f, fill=(r,g,b))
+    # Accent dot at dead centre
+    d.ellipse([cx-5,cy-5,cx+5,cy+5], fill=pal["a1"])
+    return grain_overlay(img, 0.035)
+
+def layout_newspaper_column(fp, pal, W, H):
+    """Vertical column of single letters — newspaper column energy."""
+    img = Image.new("RGB",(W,H), pal["bg"])
+    d = ImageDraw.Draw(img)
+    # Left: massive letter column
+    letters = list(ALPHABET_STR[:12])
+    col_size = H//12 - 4
+    f = lf(fp, col_size)
+    for i,ch in enumerate(letters):
+        y = i*(col_size+4)+10
+        col = pal["a1"] if i%4==0 else pal["fg"]
+        d.text((30, y), ch, font=f, fill=col)
+    # Vertical rule
+    draw_rule(d, int(W*0.22), 0, int(W*0.22), H, pal["a1"], 3)
+    # Right: giant single letter
+    ch_big = random.choice(list("ABCGMNRST"))
+    f_big, _ = fit_to_width(fp, ch_big, int(W*0.70), 700)
+    tw,th = bb(d,ch_big,f_big)
+    d.text((int(W*0.24), (H-th)//2), ch_big, font=f_big, fill=pal["fg"])
+    # Ghost behind
+    d.text((int(W*0.24)+12, (H-th)//2+12), ch_big, font=f_big, fill=(*pal["a1"][:3],18))
+    return grain_overlay(img, 0.03)
+
+def layout_book_cover(fp, pal, W, H):
+    """Clean book cover composition — Frontier/Audubon aesthetic."""
+    img = Image.new("RGB",(W,H), pal["bg"])
+    d = ImageDraw.Draw(img)
+    # Top thick bar
+    bar_h = int(H*0.12)
+    d.rectangle([0,0,W,bar_h], fill=pal["a1"])
+    # Bottom bar
+    d.rectangle([0,H-bar_h,W,H], fill=pal["dim"])
+    # Central letterform — fits within safe zone
+    ch = random.choice(list("ABCDEFGMNPRSTW"))
+    f, sz = fit_to_width(fp, ch, int(W*0.5), 600)
+    tw,th = bb(d,ch,f)
+    cx = int(W*0.62); cy = H//2
+    # Shadow
+    d.text((cx-tw//2+8,cy-th//2+8), ch, font=f, fill=(*pal["dim"][:3],120))
+    d.text((cx-tw//2, cy-th//2), ch, font=f, fill=pal["fg"])
+    # Left: vertical letters small
+    f_sm = lf(fp, 22)
+    for i,c2 in enumerate(ALPHABET_STR[:16]):
+        d.text((28, bar_h+20+i*((H-bar_h*2-40)//16)), c2, font=f_sm, fill=pal["fg"])
+    # Thin line separating left strip
+    draw_rule(d, 60, bar_h+10, 60, H-bar_h-10, pal["a2"], 1)
+    return grain_overlay(img, 0.04)
+
+def layout_halftone_ghost(fp, pal, W, H):
+    """Giant ghost letter with halftone dot pattern overlay."""
+    img = Image.new("RGB",(W,H), pal["bg"])
+    d = ImageDraw.Draw(img)
+    ch = random.choice(list("ABCDEFGHJKMNOPQRST"))
+    # Ghost letter super faint
+    f_ghost, _ = fit_to_width(fp, ch, int(W*0.95), 800)
+    tg,thg = bb(d,ch,f_ghost)
+    d.text(((W-tg)//2,(H-thg)//2), ch, font=f_ghost, fill=(*pal["fg"][:3],20))
+    # Halftone dots following letter silhouette
+    f_mask, _ = fit_to_width(fp, ch, int(W*0.82), 700)
+    tm,thm = bb(d,ch,f_mask)
+    # Create letter mask
+    mask_img = Image.new("L",(W,H),0)
+    ImageDraw.Draw(mask_img).text(((W-tm)//2,(H-thm)//2), ch, font=f_mask, fill=255)
+    mask_arr = np.array(mask_img)
+    # Draw dots where mask is filled
+    dot_gap = 22
+    for y in range(0,H,dot_gap):
+        for x in range(0,W,dot_gap):
+            if mask_arr[min(y,H-1),min(x,W-1)] > 80:
+                # size based on distance from edge of letter
+                sz = random.randint(3,10)
+                col = pal["a1"] if random.random()<0.2 else pal["fg"]
+                d.ellipse([x-sz,y-sz,x+sz,y+sz], fill=col)
+    return grain_overlay(img, 0.03)
+
+def layout_vhs_horror(fp, pal, W, H):
+    """VHS/horror movie poster energy — like Videodrome."""
+    bg_pal = {"bg":(5,5,8),"fg":(255,255,255),"a1":(255,30,30),"a2":(0,200,100),"dim":(30,30,35)}
+    img = Image.new("RGB",(W,H), bg_pal["bg"])
+    d = ImageDraw.Draw(img)
+    word = random.choice(["FORM","BOLD","TYPE","EDIT","NEUE","GRSK"])
+    # Scanline texture bg
+    for y in range(0,H,3): d.line([(0,y),(W,y)],fill=(15,15,18))
+    # RGB glitch: draw word 3 times offset
+    f, sz = fit_to_width(fp, word, W-60, 500)
+    tw,th = bb(d,word,f); x,y = cxy(W,H,tw,th)
+    for off,col in [(-4,(255,0,0,80)),(0,(0,255,100,80)),(4,(0,100,255,80))]:
+        tmp = Image.new("RGBA",(W,H),(0,0,0,0))
+        ImageDraw.Draw(tmp).text((x+off,y),word,font=f,fill=col)
+        img = Image.alpha_composite(img.convert("RGBA"),tmp).convert("RGB")
+    d = ImageDraw.Draw(img)
+    d.text((x,y), word, font=f, fill=bg_pal["fg"])
+    # Glitch lines
+    for _ in range(6):
+        gy = random.randint(0,H); gw = random.randint(50,200)
+        gx = random.randint(0,W-gw)
+        d.rectangle([gx,gy,gx+gw,gy+random.randint(1,3)], fill=bg_pal["a1"])
+    img = grain_overlay(img, 0.06)
+    return img
+
+def layout_swiss_grid(fp, pal, W, H):
+    """Swiss International Typographic Style — pure grid geometry."""
+    img = Image.new("RGB",(W,H), pal["bg"])
+    d = ImageDraw.Draw(img)
+    # Grid
+    cols, rows = 8, 5
+    cw, rh = W//cols, H//rows
+    # Filled cells
+    fill_cells = random.sample([(r,c) for r in range(rows) for c in range(cols)], 6)
+    for (r,c) in fill_cells:
+        col = pal["a1"] if random.random()<0.4 else pal["dim"]
+        d.rectangle([c*cw+1,r*rh+1,(c+1)*cw-1,(r+1)*rh-1], fill=col)
+    # Letters in remaining cells
+    f_cell = lf(fp, int(min(cw,rh)*0.65))
+    used = set(fill_cells)
+    letter_cells = random.sample([(r,c) for r in range(rows) for c in range(cols) if (r,c) not in used], 12)
+    for i,(r,c) in enumerate(letter_cells):
+        ch = ALPHABET_STR[i%26]
+        cw2,ch2 = bb(d,ch,f_cell)
+        cx = c*cw+(cw-cw2)//2; cy = r*rh+(rh-ch2)//2
+        col = pal["fg"] if (r,c) not in fill_cells else pal["bg"]
+        d.text((cx,cy), ch, font=f_cell, fill=col)
+    # Hairlines
+    for c in range(cols+1): draw_rule(d,c*cw,0,c*cw,H,(*pal["dim"][:3],80),1)
+    for r in range(rows+1): draw_rule(d,0,r*rh,W,r*rh,(*pal["dim"][:3],80),1)
+    return grain_overlay(img, 0.025)
+
+def layout_ink_bleed(fp, pal, W, H):
+    """Oversized letter bleeds off edges — raw ink energy."""
+    img = Image.new("RGB",(W,H), pal["bg"])
+    d = ImageDraw.Draw(img)
+    ch = random.choice(list("ABCEFGHJKMNPQRSTW"))
+    # Bleed off edges — letter bigger than canvas
+    sz = int(H*1.4)
+    f = lf(fp, sz)
+    tw,th = bb(d,ch,f)
+    # Offset to bleed on one side
+    offsets = [(-tw//3,-th//4), (-tw//2,0), (0,-th//3), (W//4-tw//2,-th//4)]
+    ox,oy = random.choice(offsets)
+    # Ink shadow
+    d.text((ox+12,oy+12), ch, font=f, fill=(*pal["a1"][:3],25))
+    d.text((ox,oy), ch, font=f, fill=pal["fg"])
+    # Corner accent
+    d.rectangle([0,0,W,8], fill=pal["a1"])
+    return grain_overlay(img, 0.04)
+
+def layout_weight_ladder(fp, pal, W, H):
+    """Same letter at ascending sizes — staircase composition."""
+    img = Image.new("RGB",(W,H), pal["bg"])
+    d = ImageDraw.Draw(img)
+    ch = random.choice(list("ABCGHMNORSTW"))
+    sizes = [16,22,30,42,58,80,110,150,200,270]
+    x_start = 30; y_start = H-30
+    x = x_start
+    for i,sz in enumerate(sizes):
+        f = lf(fp,sz); tw,th = bb(d,ch,f)
+        y = y_start - th
+        t = i/len(sizes)
+        r = int(pal["dim"][0]*(1-t)+pal["fg"][0]*t)
+        g = int(pal["dim"][1]*(1-t)+pal["fg"][1]*t)
+        b = int(pal["dim"][2]*(1-t)+pal["fg"][2]*t)
+        col = pal["a1"] if i==len(sizes)-1 else (r,g,b)
+        d.text((x,y), ch, font=f, fill=col)
+        x += tw+int(sz*0.08)
+        if x > W-50: break
+    draw_rule(d, 30, H-36, min(x,W-20), H-36, pal["a2"], 2)
+    return grain_overlay(img, 0.03)
+
+def layout_negative_space(fp, pal, W, H):
+    """Inverted — dark letter punched from white field."""
+    img = Image.new("RGB",(W,H), pal["fg"])
+    d = ImageDraw.Draw(img)
+    ch = random.choice(list("ABCDEFGHJKMNPQRST"))
+    f, sz = fit_to_width(fp, ch, int(W*0.82), 700)
+    tw,th = bb(d,ch,f)
+    # Letter in bg colour = punched out
+    d.text(((W-tw)//2,(H-th)//2), ch, font=f, fill=pal["bg"])
+    # Thin border inside letter as accent
+    for r in range(1,4):
+        tmp = Image.new("RGBA",(W,H),(0,0,0,0))
+        ImageDraw.Draw(tmp).text(((W-tw)//2,(H-th)//2), ch, font=f, fill=(*pal["a1"][:3],int(60/r)))
+        # Erode to get inner ring — just offset
+        for ox,oy in [(r,0),(-r,0),(0,r),(0,-r)]:
+            tmp2 = Image.new("RGBA",(W,H),(0,0,0,0))
+            ImageDraw.Draw(tmp2).text(((W-tw)//2+ox,(H-th)//2+oy), ch, font=f, fill=(*pal["bg"][:3],255))
+            img.paste(Image.alpha_composite(img.convert("RGBA"),tmp2).convert("RGB"))
+    draw_rule(ImageDraw.Draw(img), 0,0,W,0,pal["a1"],6)
+    draw_rule(ImageDraw.Draw(img), 0,H-1,W,H-1,pal["a1"],6)
+    return grain_overlay(img, 0.025)
+
+def layout_constructivist(fp, pal, W, H):
+    """Constructivist — diagonal geometry + bold letterforms. EAT SLEEP BRAND energy."""
+    img = Image.new("RGB",(W,H), pal["bg"])
+    d = ImageDraw.Draw(img)
+    # Bold diagonal red rectangle
+    pts = [(0,H//3),(W//2,0),(W,H//4),(W//2,H)]
+    d.polygon(pts, fill=pal["a1"])
+    # Two-tone geometry
+    d.polygon([(0,H*2//3),(W//4,H//2),(W//3,H),(0,H)], fill=pal["dim"])
+    # Letters
+    word = random.choice(PUNCHY_WORDS)
+    f, sz = fit_to_width(fp, word, int(W*0.75), 500)
+    tw,th = bb(d,word,f)
+    x,y = cxy(W,H,tw,th)
+    # Shadow
+    d.text((x+6,y+6), word, font=f, fill=(*pal["bg"][:3],80))
+    d.text((x,y), word, font=f, fill=pal["fg"])
+    return grain_overlay(img, 0.04)
+
+
+# ── LAYOUT REGISTRY ───────────────────────────────────────────────
+LAYOUTS = [
+    ("single_letter_hero",    layout_single_letter_hero),
+    ("two_letter_contrast",   layout_two_letter_contrast),
+    ("alphabet_arc",          layout_alphabet_arc),
+    ("poster_fill",           layout_poster_fill),
+    ("grid_letters",          layout_grid_letters),
+    ("split_color_letter",    layout_split_color_letter),
+    ("number_mono",           layout_number_mono),
+    ("diagonal_sweep",        layout_diagonal_sweep),
+    ("concentric_letters",    layout_concentric_letters),
+    ("newspaper_column",      layout_newspaper_column),
+    ("book_cover",            layout_book_cover),
+    ("halftone_ghost",        layout_halftone_ghost),
+    ("vhs_horror",            layout_vhs_horror),
+    ("swiss_grid",            layout_swiss_grid),
+    ("ink_bleed",             layout_ink_bleed),
+    ("weight_ladder",         layout_weight_ladder),
+    ("negative_space",        layout_negative_space),
+    ("constructivist",        layout_constructivist),
+]
+
+
+# ── GENERATE ONE SHOWCASE ─────────────────────────────────────────
+def generate_showcase(font_path, layout_name=None, palette=None, seed=None):
+    if seed is not None: random.seed(seed); np.random.seed(seed%2**31)
+    fp    = str(font_path)
+    name, fn = random.choice(LAYOUTS) if layout_name is None else next(x for x in LAYOUTS if x[0]==layout_name)
+    pal   = palette or random.choice(PALETTES)
+
+    try:
+        img = fn(fp, pal, CARD_W, CARD_H)
+    except Exception as e:
+        # Fallback: single letter
+        img = layout_single_letter_hero(fp, pal, CARD_W, CARD_H)
+        print(f"   ⚠ '{name}' failed ({e}), used fallback")
+
+    # Subtle vignette on all cards
+    img = vignette(img, 0.35)
+    return img, name, pal
+
+
+# ── BATCH RUN ─────────────────────────────────────────────────────
+if __name__ == "__main__":
+    font_files = []
+    for ext in ("*.ttf","*.otf","*.TTF","*.OTF"):
+        font_files.extend(FONT_DIR.rglob(ext))
+
+    if not font_files:
+        for root in [Path("/usr/share/fonts"),Path("/Library/Fonts"),
+                     Path("/System/Library/Fonts"),Path("C:/Windows/Fonts")]:
+            if root.exists():
+                for ext in ("*.ttf","*.otf"):
+                    font_files.extend(root.rglob(ext))
+        font_files = random.sample(font_files, min(20,len(font_files)))
+        print(f"ℹ️  Using {len(font_files)} system fonts")
+
+    valid = []
+    for f in font_files:
+        try: ImageFont.truetype(str(f),50); valid.append(str(f))
+        except: pass
+
+    if not valid:
+        print(f"❌ No usable fonts in {FONT_DIR}"); sys.exit(1)
+
+    print(f"\n{'═'*55}")
+    print(f"  Fonts    : {len(valid)}")
+    print(f"  Layouts  : {len(LAYOUTS)}")
+    print(f"  Palettes : {len(PALETTES)}")
+    print(f"  Output   : {OUTPUT_DIR}")
+    print(f"{'═'*55}\n")
+
+    total=0; errors=0
+    for i,fp in enumerate(valid):
+        try:
+            img, layout, pal = generate_showcase(fp, seed=i*13+7)
+            stem = Path(fp).stem
+            out  = OUTPUT_DIR / f"{stem}_{layout}.jpg"
+            img.save(str(out), quality=95)
+            print(f"[{i+1:3d}/{len(valid)}] ✅  {stem:<35} {layout}")
+            total+=1
+        except Exception as e:
+            errors+=1; print(f"[{i+1:3d}/{len(valid)}] ❌  {Path(fp).stem}: {e}")
+
+    print(f"\n✅ {total} showcases → {OUTPUT_DIR}/")
+
+    # BONUS: generate all 18 layouts for first font
+    if valid:
+        fp = valid[0]; stem = Path(fp).stem
+        bonus = OUTPUT_DIR/"all_layouts"; bonus.mkdir(exist_ok=True)
+        print(f"\n🎨 All 18 layouts × all palettes for: {stem}")
+        for lname,lfn in LAYOUTS:
+            for j,pal in enumerate(PALETTES):
+                try:
+                    img,_,_ = generate_showcase(fp, layout_name=lname, palette=pal, seed=j*3)
+                    img.save(str(bonus/f"{lname}_{pal.get('name',j)}.jpg"), quality=93)
+                    print(f"   ✅ {lname:<25} palette {j+1}/{len(PALETTES)}")
+                except Exception as e:
+                    print(f"   ❌ {lname}: {e}")
+        print(f"\n✅ All layouts in {bonus}/")
