@@ -1,0 +1,1359 @@
+"""
+MEGA Image Text Effects — 115+ Effects on a Single Font
+========================================================
+SETUP:
+  1. pip install Pillow numpy
+  2. Set FONT_PATH, YOUR_TEXT, FONT_SIZE below
+  3. Drop images into ./images/
+  4. Run — outputs go to ./outputs/<FontName>/<image>/
+"""
+
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance, ImageChops, ImageOps
+from pathlib import Path
+import random, math, sys, colorsys
+import numpy as np
+
+# ═══════════════════════════════════════════════════════════════════
+#  ✏️  EDIT THESE
+# ═══════════════════════════════════════════════════════════════════
+FONT_PATH  = r"/Users/ashirwadbhardwaj/fonts_task/fonts_task/PinyonScript-Regular.ttf"   # ← paste your font path here
+YOUR_TEXT  = "Life's Hella Good"
+FONT_SIZE  = 65
+
+try:
+    SCRIPT_DIR = Path(__file__).parent
+except NameError:
+    SCRIPT_DIR = Path.cwd()
+
+IMAGE_DIR  = SCRIPT_DIR / "images"
+OUTPUT_DIR = SCRIPT_DIR / "outputs"
+OUTPUT_DIR.mkdir(exist_ok=True)
+IMAGE_DIR.mkdir(exist_ok=True)
+# ═══════════════════════════════════════════════════════════════════
+
+
+# ── CORE HELPERS ──────────────────────────────────────────────────
+def load_image(path) -> Image.Image:
+    return Image.open(str(path)).convert("RGBA")
+
+def save(img: Image.Image, path: str):
+    img.convert("RGB").save(path, quality=92)
+
+def gf(size: int) -> ImageFont.FreeTypeFont:
+    return ImageFont.truetype(FONT_PATH, size)
+
+def tbbox(draw, text, font):
+    bb = draw.textbbox((0, 0), text, font=font)
+    return bb[2]-bb[0], bb[3]-bb[1]
+
+def fit(draw, text, max_w, size, min_s=16):
+    s = size
+    while s >= min_s:
+        f = gf(s)
+        w, _ = tbbox(draw, text, f)
+        if w <= max_w: return f, s
+        s -= 3
+    return gf(min_s), min_s
+
+def center_xy(img, tw, th):
+    return (img.width-tw)//2, (img.height-th)//2
+
+def text_layer(img, text, size, fill=(255,255,255,255), shadow=None):
+    """Render text centred on a transparent layer same size as img."""
+    tmp = Image.new("RGBA", img.size, (0,0,0,0))
+    d   = ImageDraw.Draw(tmp)
+    f, _ = fit(d, text, img.width-40, size)
+    tw, th = tbbox(d, text, f)
+    x, y = center_xy(img, tw, th)
+    if shadow:
+        d.text((x+shadow[0], y+shadow[1]), text, font=f, fill=shadow[2])
+    d.text((x, y), text, font=f, fill=fill)
+    return tmp, f, x, y, tw, th
+
+def render_chars(img, text, size, color_fn):
+    """Render each character individually with color_fn(i, char) -> RGBA."""
+    tmp = Image.new("RGBA", img.size, (0,0,0,0))
+    d   = ImageDraw.Draw(tmp)
+    f, _ = fit(d, text, img.width-40, size)
+    full_w, full_h = tbbox(d, text, f)
+    cx = (img.width - full_w)//2
+    cy = (img.height - full_h)//2
+    x  = cx
+    for i, ch in enumerate(text):
+        cw, ch2 = tbbox(d, ch, f)
+        d.text((x, cy), ch, font=f, fill=color_fn(i, ch))
+        x += cw
+    return tmp
+
+def np_to_pil(arr):
+    arr = np.clip(arr, 0, 255).astype(np.uint8)
+    return Image.fromarray(arr)
+
+def pil_to_np(img):
+    return np.array(img).astype(np.float32)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  ORIGINAL 15 EFFECTS
+# ══════════════════════════════════════════════════════════════════
+
+def effect_centered(bg, text, size):
+    img=bg.copy(); d=ImageDraw.Draw(img)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f)
+    x,y=center_xy(img,tw,th)
+    d.text((x+3,y+3),text,font=f,fill=(0,0,0,180))
+    d.text((x,y),text,font=f,fill=(255,255,255,255)); return img
+
+def effect_bottom_band(bg, text, size):
+    img=bg.copy(); d=ImageDraw.Draw(img)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f)
+    bh=th+40; ov=Image.new("RGBA",img.size,(0,0,0,0))
+    ImageDraw.Draw(ov).rectangle([0,img.height-bh,img.width,img.height],fill=(0,0,0,165))
+    img=Image.alpha_composite(img,ov); d=ImageDraw.Draw(img)
+    d.text(((img.width-tw)//2, img.height-bh+(bh-th)//2),text,font=f,fill=(255,255,255,255)); return img
+
+def effect_top_overlay(bg, text, size):
+    img=bg.copy(); d=ImageDraw.Draw(img)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f)
+    bh=th+50; ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    for i in range(bh): od.line([(0,i),(img.width,i)],fill=(0,0,0,int(185*(1-i/bh))))
+    img=Image.alpha_composite(img,ov); d=ImageDraw.Draw(img)
+    d.text(((img.width-tw)//2,(bh-th)//2),text,font=f,fill=(255,255,255,255)); return img
+
+def effect_blurred_bg(bg, text, size):
+    img=bg.filter(ImageFilter.GaussianBlur(radius=12)); d=ImageDraw.Draw(img)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    d.text((x+3,y+3),text,font=f,fill=(0,0,0,200)); d.text((x,y),text,font=f,fill=(255,255,255,255)); return img
+
+def effect_rotated(bg, text, size):
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); td=ImageDraw.Draw(tmp)
+    f,_=fit(td,text,img.width-40,size); tw,th=tbbox(td,text,f); tx,ty=center_xy(img,tw,th)
+    td.text((tx+3,ty+3),text,font=f,fill=(0,0,0,160)); td.text((tx,ty),text,font=f,fill=(255,255,255,230))
+    return Image.alpha_composite(img,tmp.rotate(30,resample=Image.BICUBIC))
+
+def effect_tilted_banner(bg, text, size):
+    img=bg.copy(); f,_=fit(ImageDraw.Draw(img),text,img.width*2,size)
+    tmp=Image.new("RGBA",(img.width*3,img.height*3),(0,0,0,0)); td=ImageDraw.Draw(tmp)
+    tw,th=tbbox(td,text,f); pad=20; sh=th+pad*2; cy=tmp.height//2
+    td.rectangle([0,cy-sh//2,tmp.width,cy+sh//2],fill=(220,50,50,210))
+    td.text(((tmp.width-tw)//2,cy-th//2),text,font=f,fill=(255,255,255,255))
+    rot=tmp.rotate(-20,resample=Image.BICUBIC)
+    cx2=(rot.width-img.width)//2; cy2=(rot.height-img.height)//2
+    return Image.alpha_composite(img,rot.crop((cx2,cy2,cx2+img.width,cy2+img.height)))
+
+def effect_slide_left(bg, text, size):
+    img=bg.copy(); d=ImageDraw.Draw(img); f,_=fit(d,text,img.width//2-20,size)
+    tw,th=tbbox(d,text,f); pad=20; tw2=tw+pad*3; th2=th+pad*2; y=(img.height-th2)//2
+    ov=Image.new("RGBA",img.size,(0,0,0,0)); ImageDraw.Draw(ov).rectangle([0,y,tw2,y+th2],fill=(20,20,20,200))
+    img=Image.alpha_composite(img,ov); ImageDraw.Draw(img).text((pad,y+pad),text,font=f,fill=(255,255,255,255)); return img
+
+def effect_slide_right(bg, text, size):
+    img=bg.copy(); d=ImageDraw.Draw(img); f,_=fit(d,text,img.width//2-20,size)
+    tw,th=tbbox(d,text,f); pad=20; tw2=tw+pad*3; th2=th+pad*2; y=(img.height-th2)//2; x0=img.width-tw2
+    ov=Image.new("RGBA",img.size,(0,0,0,0)); ImageDraw.Draw(ov).rectangle([x0,y,img.width,y+th2],fill=(20,20,20,200))
+    img=Image.alpha_composite(img,ov); ImageDraw.Draw(img).text((x0+pad,y+pad),text,font=f,fill=(255,255,255,255)); return img
+
+def effect_overlap(bg, text, size):
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f,_=fit(od,text,img.width-20,size+10); tw,th=tbbox(od,text,f)
+    od.text(center_xy(img,tw,th),text,font=f,fill=(255,255,255,100)); return Image.alpha_composite(img,ov)
+
+def effect_ghost(bg, text, size):
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); td=ImageDraw.Draw(tmp)
+    f,_=fit(td,text,img.width-10,size+30); tw,th=tbbox(td,text,f)
+    td.text(center_xy(img,tw,th),text,font=f,fill=(255,255,255,55))
+    return Image.alpha_composite(img,tmp.filter(ImageFilter.GaussianBlur(radius=4)))
+
+def effect_scatter(bg, text, size):
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f,_=fit(od,text,img.width//2,int(size*0.75)); tw,th=tbbox(od,text,f); random.seed(42)
+    for _ in range(9):
+        x=random.randint(0,max(1,img.width-tw)); y=random.randint(0,max(1,img.height-th))
+        od.text((x,y),text,font=f,fill=(random.randint(180,255),random.randint(180,255),random.randint(180,255),random.randint(80,200)))
+    return Image.alpha_composite(img,ov)
+
+def effect_glow(bg, text, size):
+    img=bg.copy(); d=ImageDraw.Draw(img); f,_=fit(d,text,img.width-40,size)
+    tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    gl=Image.new("RGBA",img.size,(0,0,0,0)); gd=ImageDraw.Draw(gl)
+    for off in range(8,0,-2):
+        gd.text((x-off,y-off),text,font=f,fill=(0,255,255,35))
+        gd.text((x+off,y+off),text,font=f,fill=(0,255,255,35))
+    gl=gl.filter(ImageFilter.GaussianBlur(radius=10)); img=Image.alpha_composite(img,gl)
+    ImageDraw.Draw(img).text((x,y),text,font=f,fill=(255,255,255,255)); return img
+
+def effect_split_panel(bg, text, size):
+    img=bg.copy(); hw=img.width//2
+    img.paste(ImageEnhance.Brightness(img.crop((0,0,hw,img.height))).enhance(0.4),(0,0))
+    d=ImageDraw.Draw(img); f,_=fit(d,text,hw-20,size); tw,th=tbbox(d,text,f)
+    x,y=(hw-tw)//2,(img.height-th)//2
+    d.text((x+2,y+2),text,font=f,fill=(0,0,0,180)); d.text((x,y),text,font=f,fill=(255,255,255,255)); return img
+
+def effect_neon_outline(bg, text, size):
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f,_=fit(od,text,img.width-40,size); tw,th=tbbox(od,text,f); x,y=center_xy(img,tw,th)
+    for dx in range(-3,4):
+        for dy in range(-3,4):
+            if abs(dx)+abs(dy)<=3: od.text((x+dx,y+dy),text,font=f,fill=(255,220,0,200))
+    od.text((x,y),text,font=f,fill=(0,0,0,255)); return Image.alpha_composite(img,ov)
+
+def effect_color_band(bg, text, size):
+    img=bg.copy(); d=ImageDraw.Draw(img); f,_=fit(d,text,img.width-40,size)
+    tw,th=tbbox(d,text,f); pad=18; sh=th+pad*2; cy=img.height//2
+    ov=Image.new("RGBA",img.size,(0,0,0,0))
+    ImageDraw.Draw(ov).rectangle([0,cy-sh//2,img.width,cy+sh//2],fill=(30,144,255,210))
+    img=Image.alpha_composite(img,ov)
+    ImageDraw.Draw(img).text(((img.width-tw)//2,cy-th//2),text,font=gf(size),fill=(255,255,255,255)); return img
+
+
+# ══════════════════════════════════════════════════════════════════
+#  📌 MARGIN & CORNER
+# ══════════════════════════════════════════════════════════════════
+
+def effect_margin_whisper(bg, text, size):
+    """Tiny faint text along the left margin, rotated 90°."""
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); td=ImageDraw.Draw(tmp)
+    f=gf(max(16,size//3)); tw,th=tbbox(td,text,f)
+    td.text((8,(img.height-tw)//2),text,font=f,fill=(255,255,255,80))
+    return Image.alpha_composite(img,tmp.rotate(90,expand=False))
+
+def effect_corner_stamp(bg, text, size):
+    """Bold text stamped in bottom-right corner with dark backing."""
+    img=bg.copy(); d=ImageDraw.Draw(img); f=gf(max(20,size//2))
+    tw,th=tbbox(d,text,f); pad=10
+    ov=Image.new("RGBA",img.size,(0,0,0,0))
+    ImageDraw.Draw(ov).rectangle([img.width-tw-pad*2,img.height-th-pad*2,img.width,img.height],fill=(0,0,0,180))
+    img=Image.alpha_composite(img,ov)
+    ImageDraw.Draw(img).text((img.width-tw-pad,img.height-th-pad),text,font=f,fill=(255,220,0,255)); return img
+
+
+# ══════════════════════════════════════════════════════════════════
+#  🔄 ROTATION & PERSPECTIVE
+# ══════════════════════════════════════════════════════════════════
+
+def effect_slight_tilt(bg, text, size):
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); td=ImageDraw.Draw(tmp)
+    f,_=fit(td,text,img.width-40,size); tw,th=tbbox(td,text,f); x,y=center_xy(img,tw,th)
+    td.text((x,y),text,font=f,fill=(255,255,255,255))
+    return Image.alpha_composite(img,tmp.rotate(-8,resample=Image.BICUBIC))
+
+def effect_aggressive_angle(bg, text, size):
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); td=ImageDraw.Draw(tmp)
+    f,_=fit(td,text,img.width-40,size); tw,th=tbbox(td,text,f); x,y=center_xy(img,tw,th)
+    td.text((x+3,y+3),text,font=f,fill=(0,0,0,160)); td.text((x,y),text,font=f,fill=(255,80,80,255))
+    return Image.alpha_composite(img,tmp.rotate(-45,resample=Image.BICUBIC))
+
+def effect_vertical_stack(bg, text, size):
+    """Letters stacked vertically down the centre."""
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f=gf(size); ch_h=tbbox(od,"A",f)[1]+4
+    total_h=ch_h*len(text); y=(img.height-total_h)//2
+    for ch in text:
+        cw,_=tbbox(od,ch,f); x=(img.width-cw)//2
+        od.text((x+2,y+2),ch,font=f,fill=(0,0,0,160)); od.text((x,y),ch,font=f,fill=(255,255,255,255))
+        y+=ch_h
+    return Image.alpha_composite(img,ov)
+
+def effect_diagonal_sweep(bg, text, size):
+    """Text swept diagonally across the whole image."""
+    img=bg.copy(); tmp=Image.new("RGBA",(img.width*2,img.height*2),(0,0,0,0)); td=ImageDraw.Draw(tmp)
+    f,_=fit(td,text,img.width,size); tw,th=tbbox(td,text,f)
+    cx,cy=tmp.width//2,tmp.height//2
+    td.text((cx-tw//2+2,cy-th//2+2),text,font=f,fill=(0,0,0,150))
+    td.text((cx-tw//2,cy-th//2),text,font=f,fill=(255,255,100,230))
+    rot=tmp.rotate(-30,resample=Image.BICUBIC)
+    ox=(rot.width-img.width)//2; oy=(rot.height-img.height)//2
+    return Image.alpha_composite(img,rot.crop((ox,oy,ox+img.width,oy+img.height)))
+
+def effect_curved_arc(bg, text, size):
+    """Text curved along a top arc."""
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f=gf(size); r=img.width*0.55; cx=img.width//2; cy=img.height+int(r*0.2)
+    angle_span=math.radians(60); start=-math.pi/2-angle_span/2
+    for i,ch in enumerate(text):
+        t=i/(max(len(text)-1,1))
+        a=start+t*angle_span
+        x=cx+r*math.cos(a); y=cy+r*math.sin(a)
+        cw,ch2=tbbox(od,ch,f)
+        tmp2=Image.new("RGBA",img.size,(0,0,0,0)); ImageDraw.Draw(tmp2).text((img.width//2-cw//2,img.height//2-ch2//2),ch,font=f,fill=(255,255,255,255))
+        deg=math.degrees(a)+90
+        rot=tmp2.rotate(-deg,resample=Image.BICUBIC,center=(img.width//2,img.height//2))
+        # Translate
+        tx=int(x-img.width//2); ty=int(y-img.height//2)
+        shifted=Image.new("RGBA",img.size,(0,0,0,0))
+        shifted.paste(rot,(tx,ty))
+        ov=Image.alpha_composite(ov,shifted)
+    return Image.alpha_composite(img,ov)
+
+def effect_circular_ring(bg, text, size):
+    """Text arranged in a full circle."""
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0))
+    f=gf(max(16,size//2)); cx=img.width//2; cy=img.height//2; r=min(cx,cy)-30
+    for i,ch in enumerate(text):
+        a=2*math.pi*i/len(text)-math.pi/2
+        x=int(cx+r*math.cos(a)); y=int(cy+r*math.sin(a))
+        tmp2=Image.new("RGBA",img.size,(0,0,0,0))
+        d2=ImageDraw.Draw(tmp2); cw,ch2=tbbox(d2,ch,f)
+        d2.text((cx-cw//2,cy-ch2//2-r),ch,font=f,fill=(255,255,255,255))
+        ov=Image.alpha_composite(ov,tmp2.rotate(-math.degrees(a),resample=Image.BICUBIC,center=(cx,cy)))
+    return Image.alpha_composite(img,ov)
+
+def effect_spiral(bg, text, size):
+    """Each letter placed along an outward spiral."""
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    cx=img.width//2; cy=img.height//2
+    for i,ch in enumerate(text):
+        t=i/max(len(text),1); a=t*4*math.pi; r=t*min(cx,cy)*0.85
+        x=int(cx+r*math.cos(a)); y=int(cy+r*math.sin(a))
+        fs=max(12,int(size*(0.5+0.5*t))); f=gf(fs); cw,ch2=tbbox(od,ch,f)
+        col=(int(255*t),int(200*(1-t)),255,220)
+        od.text((x-cw//2,y-ch2//2),ch,font=f,fill=col)
+    return Image.alpha_composite(img,ov)
+
+def effect_perspective_warp(bg, text, size):
+    """Simulate perspective by shrinking top of text (trapezoid warp)."""
+    img=bg.copy()
+    tmp=Image.new("RGBA",img.size,(0,0,0,0)); td=ImageDraw.Draw(tmp)
+    f,_=fit(td,text,img.width-40,size); tw,th=tbbox(td,text,f); x,y=center_xy(img,tw,th)
+    td.text((x,y),text,font=f,fill=(255,255,255,255))
+    arr=np.array(tmp)  # uint8 (H,W,4)
+    out=np.zeros_like(arr)
+    for row in range(th):
+        t=row/max(th-1,1); scale=0.3+0.7*t; new_w=int(tw*scale)
+        if new_w<1: continue
+        src=arr[y+row, x:x+tw]           # (tw, 4) uint8
+        if src.shape[0]==0: continue
+        row_img=Image.fromarray(src.reshape(1,-1,4),"RGBA").resize((new_w,1),Image.BILINEAR)
+        strip=np.array(row_img)[0]        # (new_w, 4)
+        ox=x+(tw-new_w)//2
+        end=min(ox+new_w, out.shape[1])
+        cols=end-ox
+        if cols>0:
+            out[y+row, ox:end] = strip[:cols]
+    return Image.alpha_composite(img, Image.fromarray(out,"RGBA"))
+
+def effect_vanishing_stretch(bg, text, size):
+    """Text that appears to stretch toward a vanishing point."""
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    steps=8
+    for i in range(steps):
+        t=i/steps; s=max(10,int(size*(0.2+0.8*t))); f=gf(s)
+        tw,th=tbbox(od,text,f); x=(img.width-tw)//2; y=img.height//2+int((i-steps//2)*(th+2))
+        a=int(50+200*t); od.text((x,y),text,font=f,fill=(255,255,255,a))
+    return Image.alpha_composite(img,ov)
+
+def effect_skewed_parallelogram(bg, text, size):
+    """Text on a skewed parallelogram banner."""
+    img=bg.copy()
+    f,_=fit(ImageDraw.Draw(img),text,img.width-40,size); d2=ImageDraw.Draw(img)
+    tw,th=tbbox(d2,text,f); pad=20; bh=th+pad*2; cy=img.height//2
+    skew=40; pts=[(skew,cy-bh//2),(img.width-skew+skew,cy-bh//2),(img.width-skew,cy+bh//2),(0,cy+bh//2)]
+    ov=Image.new("RGBA",img.size,(0,0,0,0)); ImageDraw.Draw(ov).polygon(pts,fill=(30,30,180,200))
+    img=Image.alpha_composite(img,ov); ImageDraw.Draw(img).text(((img.width-tw)//2,cy-th//2),text,font=f,fill=(255,255,255,255))
+    return img
+
+
+# ══════════════════════════════════════════════════════════════════
+#  ✂️ SPLIT / PARTIAL
+# ══════════════════════════════════════════════════════════════════
+
+def effect_first_letter_highlight(bg, text, size):
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f,_=fit(od,text,img.width-40,size); tw,_=tbbox(od,text,f); x=(img.width-tw)//2
+    f_big=gf(int(size*1.5)); f_small=gf(size)
+    _,th_big=tbbox(od,text[0],f_big); _,th_sm=tbbox(od,text[1:],f_small)
+    y=img.height//2-max(th_big,th_sm)//2
+    cw,_=tbbox(od,text[0],f_big)
+    od.text((x,y),text[0],font=f_big,fill=(255,220,0,255))
+    od.text((x+cw,y+(th_big-th_sm)),text[1:],font=f_small,fill=(255,255,255,220))
+    return Image.alpha_composite(img,ov)
+
+def effect_drop_cap(bg, text, size):
+    """Large drop-cap first letter with rest of text beside it."""
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    fc=gf(size*2); fr=gf(size)
+    cw,ch=tbbox(od,text[0],fc); rw,rh=tbbox(od,text[1:],fr)
+    total_w=cw+10+rw; x=(img.width-total_w)//2; y=(img.height-ch)//2
+    od.text((x,y),text[0],font=fc,fill=(255,220,50,255))
+    od.text((x+cw+10,y+ch-rh),text[1:],font=fr,fill=(255,255,255,230))
+    return Image.alpha_composite(img,ov)
+
+def effect_half_blur_sharp(bg, text, size):
+    """Left half: blurred text. Right half: sharp text."""
+    img=bg.copy(); half=img.width//2
+    tmp_s=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp_s)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    d.text((x,y),text,font=f,fill=(255,255,255,255))
+    tmp_b=tmp_s.filter(ImageFilter.GaussianBlur(10))
+    mask=Image.new("L",img.size,0); ImageDraw.Draw(mask).rectangle([0,0,half,img.height],fill=255)
+    composite=Image.composite(tmp_b,tmp_s,mask)
+    return Image.alpha_composite(img,composite)
+
+def effect_top_sharp_bottom_blur(bg, text, size):
+    img=bg.copy(); half=img.height//2
+    tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    d.text((x,y),text,font=f,fill=(255,255,255,255))
+    blurred=tmp.filter(ImageFilter.GaussianBlur(10))
+    mask=Image.new("L",img.size,0); ImageDraw.Draw(mask).rectangle([0,0,img.width,half],fill=255)
+    return Image.alpha_composite(img,Image.composite(tmp,blurred,mask))
+
+def effect_left_color_right_mono(bg, text, size):
+    img=bg.copy(); hw=img.width//2
+    right=ImageOps.grayscale(img.crop((hw,0,img.width,img.height))).convert("RGBA")
+    img.paste(right,(hw,0))
+    tmp,f,x,y,tw,th=text_layer(img,text,size,fill=(255,255,255,255))
+    return Image.alpha_composite(img,tmp)
+
+def effect_letter_coloring(bg, text, size):
+    palette=[(255,80,80),(255,200,0),(80,255,80),(80,200,255),(200,80,255),(255,140,0)]
+    ov=render_chars(bg,text,size,lambda i,c:(palette[i%len(palette)]+(255,)))
+    return Image.alpha_composite(bg.copy(),ov)
+
+def effect_alternate_opacity(bg, text, size):
+    ov=render_chars(bg,text,size,lambda i,c:(255,255,255,255 if i%2==0 else 80))
+    return Image.alpha_composite(bg.copy(),ov)
+
+def effect_split_h_color(bg, text, size):
+    """Top half of text: red. Bottom half: blue."""
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    d.text((x,y),text,font=f,fill=(255,60,60,255))
+    tmp2=Image.new("RGBA",img.size,(0,0,0,0)); d2=ImageDraw.Draw(tmp2)
+    d2.text((x,y),text,font=f,fill=(60,60,255,255))
+    mask=Image.new("L",img.size,0); ImageDraw.Draw(mask).rectangle([0,y+th//2,img.width,img.height],fill=255)
+    return Image.alpha_composite(img,Image.composite(tmp2,tmp,mask))
+
+def effect_split_v_color(bg, text, size):
+    """Left half of text: green. Right half: magenta."""
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    d.text((x,y),text,font=f,fill=(50,255,50,255))
+    tmp2=Image.new("RGBA",img.size,(0,0,0,0)); d2=ImageDraw.Draw(tmp2)
+    d2.text((x,y),text,font=f,fill=(255,50,200,255))
+    mask=Image.new("L",img.size,0); ImageDraw.Draw(mask).rectangle([x+tw//2,0,img.width,img.height],fill=255)
+    return Image.alpha_composite(img,Image.composite(tmp2,tmp,mask))
+
+def effect_masked_reveal(bg, text, size):
+    """Text only visible in a circular spotlight."""
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    d.text((x,y),text,font=f,fill=(255,255,255,255))
+    mask=Image.new("L",img.size,0); r=int(min(tw,th)*1.2)
+    ImageDraw.Draw(mask).ellipse([x+tw//2-r,y+th//2-r,x+tw//2+r,y+th//2+r],fill=255)
+    mask=mask.filter(ImageFilter.GaussianBlur(20))
+    tmp.putalpha(mask)
+    return Image.alpha_composite(img,tmp)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  🌈 COLOR & LIGHT
+# ══════════════════════════════════════════════════════════════════
+
+def effect_gradient_fill(bg, text, size):
+    """Text filled with a horizontal gradient (left=red, right=blue)."""
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    grad=Image.new("RGBA",(tw,th)); gd=ImageDraw.Draw(grad)
+    for i in range(tw):
+        t=i/tw; r=int(255*(1-t)); b=int(255*t)
+        gd.line([(i,0),(i,th)],fill=(r,50,b,255))
+    mask=Image.new("L",img.size,0); d.text((x,y),text,font=f,fill=255)
+    tmp2=Image.new("RGBA",img.size,(0,0,0,0)); tmp2.paste(grad,(x,y))
+    tmp2.putalpha(tmp.split()[3])
+    return Image.alpha_composite(img,tmp2)
+
+def effect_multistop_gradient(bg, text, size):
+    """Rainbow horizontal gradient inside text."""
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    stops=[(255,0,0),(255,165,0),(255,255,0),(0,200,0),(0,150,255),(160,0,255)]
+    grad=Image.new("RGBA",(tw,th)); gd=ImageDraw.Draw(grad)
+    for i in range(tw):
+        t=i/tw*(len(stops)-1); si=int(t); ti=t-si
+        if si>=len(stops)-1: c=stops[-1]
+        else: c=tuple(int(stops[si][j]*(1-ti)+stops[si+1][j]*ti) for j in range(3))
+        gd.line([(i,0),(i,th)],fill=(*c,255))
+    alpha_layer=Image.new("L",img.size,0); ImageDraw.Draw(alpha_layer).text((x,y),text,font=f,fill=255)
+    result=Image.new("RGBA",img.size,(0,0,0,0)); result.paste(grad,(x,y))
+    result.putalpha(alpha_layer)
+    return Image.alpha_composite(img,result)
+
+def effect_outer_glow(bg, text, size):
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    gl=Image.new("RGBA",img.size,(0,0,0,0)); gd=ImageDraw.Draw(gl)
+    for r in range(12,0,-2): gd.text((x-r//2,y-r//2),text,font=f,fill=(255,200,0,20))
+    gl=gl.filter(ImageFilter.GaussianBlur(8))
+    img=Image.alpha_composite(img,gl)
+    ImageDraw.Draw(img).text((x,y),text,font=f,fill=(255,255,255,255)); return img
+
+def effect_inner_glow(bg, text, size):
+    """Text with a glowing inner edge (white core, coloured halo)."""
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    for r in range(1,5): d.text((x-r,y),text,font=f,fill=(100,200,255,60))
+    d.text((x,y),text,font=f,fill=(255,255,255,255))
+    return Image.alpha_composite(img,tmp)
+
+def effect_rainbow_wave(bg, text, size):
+    """Each character gets a hue cycling through the rainbow."""
+    def color_fn(i,c):
+        h=i/max(len(YOUR_TEXT),1); r,g,b=colorsys.hsv_to_rgb(h,1,1)
+        return (int(r*255),int(g*255),int(b*255),255)
+    ov=render_chars(bg,text,size,color_fn)
+    return Image.alpha_composite(bg.copy(),ov)
+
+def effect_metallic_gold(bg, text, size):
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    grad=Image.new("RGBA",(tw,th)); gd=ImageDraw.Draw(grad)
+    gold=[(180,120,0),(255,215,0),(255,255,150),(255,215,0),(180,120,0)]
+    for j in range(th):
+        t=j/th*(len(gold)-1); si=int(t); ti=t-si
+        if si>=len(gold)-1: c=gold[-1]
+        else: c=tuple(int(gold[si][k]*(1-ti)+gold[si+1][k]*ti) for k in range(3))
+        gd.line([(0,j),(tw,j)],fill=(*c,255))
+    alpha_l=Image.new("L",img.size,0); ImageDraw.Draw(alpha_l).text((x,y),text,font=f,fill=255)
+    result=Image.new("RGBA",img.size,(0,0,0,0)); result.paste(grad,(x,y)); result.putalpha(alpha_l)
+    # highlight stroke
+    d.text((x+1,y-1),text,font=f,fill=(255,255,200,120))
+    return Image.alpha_composite(img,Image.alpha_composite(result,tmp))
+
+def effect_chrome(bg, text, size):
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    chrome=[(40,40,40),(200,200,200),(255,255,255),(180,180,180),(80,80,80),(220,220,220)]
+    grad=Image.new("RGBA",(tw,th)); gd=ImageDraw.Draw(grad)
+    for j in range(th):
+        t=j/th*(len(chrome)-1); si=int(t); ti=t-si
+        if si>=len(chrome)-1: c=chrome[-1]
+        else: c=tuple(int(chrome[si][k]*(1-ti)+chrome[si+1][k]*ti) for k in range(3))
+        gd.line([(0,j),(tw,j)],fill=(*c,255))
+    alpha_l=Image.new("L",img.size,0); ImageDraw.Draw(alpha_l).text((x,y),text,font=f,fill=255)
+    result=Image.new("RGBA",img.size,(0,0,0,0)); result.paste(grad,(x,y)); result.putalpha(alpha_l)
+    return Image.alpha_composite(img,result)
+
+def effect_glassmorphism(bg, text, size):
+    """Frosted glass panel behind text."""
+    img=bg.copy(); d=ImageDraw.Draw(img); f,_=fit(d,text,img.width-80,size)
+    tw,th=tbbox(d,text,f); pad=30; x,y=center_xy(img,tw,th)
+    rx0,ry0,rx1,ry1=x-pad,y-pad,x+tw+pad,y+th+pad
+    glass=img.crop((rx0,ry0,rx1,ry1)).filter(ImageFilter.GaussianBlur(15))
+    ov=Image.new("RGBA",glass.size,(255,255,255,40))
+    glass=Image.alpha_composite(glass.convert("RGBA"),ov)
+    img.paste(glass,(rx0,ry0))
+    ov2=Image.new("RGBA",img.size,(0,0,0,0))
+    ImageDraw.Draw(ov2).rounded_rectangle([rx0,ry0,rx1,ry1],radius=16,outline=(255,255,255,120),width=2)
+    img=Image.alpha_composite(img,ov2)
+    ImageDraw.Draw(img).text((x,y),text,font=f,fill=(255,255,255,240)); return img
+
+def effect_frosted_ice(bg, text, size):
+    img=bg.copy(); d=ImageDraw.Draw(img); f,_=fit(d,text,img.width-60,size)
+    tw,th=tbbox(d,text,f); pad=20; x,y=center_xy(img,tw,th)
+    area=img.crop((x-pad,y-pad,x+tw+pad,y+th+pad)).filter(ImageFilter.GaussianBlur(10))
+    tint=Image.new("RGBA",area.size,(180,230,255,60))
+    area=Image.alpha_composite(area.convert("RGBA"),tint)
+    img.paste(area,(x-pad,y-pad))
+    ImageDraw.Draw(img).text((x+1,y+1),text,font=f,fill=(180,240,255,255)); return img
+
+def effect_fire_edge(bg, text, size):
+    """Text with an orange/red fire-glow outline."""
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    fire=Image.new("RGBA",img.size,(0,0,0,0)); fd=ImageDraw.Draw(fire)
+    for r in range(10,0,-2):
+        alpha=int(180*(1-r/10))
+        rr=int(255); gg=int(100*(1-r/10)); bb=0
+        fd.text((x-r//2,y+r//3),text,font=f,fill=(rr,gg,bb,alpha))
+    fire=fire.filter(ImageFilter.GaussianBlur(4))
+    img=Image.alpha_composite(img,fire)
+    ImageDraw.Draw(img).text((x,y),text,font=f,fill=(255,240,180,255)); return img
+
+def effect_electric_plasma(bg, text, size):
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    for r in range(8,0,-1):
+        t=r/8; col=(int(100*t),int(200*(1-t)),255,int(60*(1-t)))
+        d.text((x+random.randint(-r,r),y+random.randint(-r,r)),text,font=f,fill=col)
+    d.text((x,y),text,font=f,fill=(200,240,255,255))
+    return Image.alpha_composite(img,tmp.filter(ImageFilter.GaussianBlur(1)))
+
+
+# ══════════════════════════════════════════════════════════════════
+#  🌫️ BLUR, SHADOW & DEPTH
+# ══════════════════════════════════════════════════════════════════
+
+def effect_soft_shadow(bg, text, size):
+    img=bg.copy(); sh=Image.new("RGBA",img.size,(0,0,0,0)); sd=ImageDraw.Draw(sh)
+    f,_=fit(sd,text,img.width-40,size); tw,th=tbbox(sd,text,f); x,y=center_xy(img,tw,th)
+    sd.text((x+6,y+6),text,font=f,fill=(0,0,0,160))
+    sh=sh.filter(ImageFilter.GaussianBlur(8)); img=Image.alpha_composite(img,sh)
+    ImageDraw.Draw(img).text((x,y),text,font=f,fill=(255,255,255,255)); return img
+
+def effect_hard_shadow(bg, text, size):
+    img=bg.copy(); d=ImageDraw.Draw(img); f,_=fit(d,text,img.width-40,size)
+    tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    d.text((x+8,y+8),text,font=f,fill=(0,0,0,255))
+    d.text((x,y),text,font=f,fill=(255,255,255,255)); return img
+
+def effect_long_shadow(bg, text, size):
+    img=bg.copy(); sh=Image.new("RGBA",img.size,(0,0,0,0)); sd=ImageDraw.Draw(sh)
+    f,_=fit(sd,text,img.width-40,size); tw,th=tbbox(sd,text,f); x,y=center_xy(img,tw,th)
+    for i in range(30):
+        a=max(0,100-i*3)
+        sd.text((x+i,y+i),text,font=f,fill=(0,0,0,a))
+    img=Image.alpha_composite(img,sh)
+    ImageDraw.Draw(img).text((x,y),text,font=f,fill=(255,255,255,255)); return img
+
+def effect_multilayer_shadow(bg, text, size):
+    img=bg.copy(); f,_=fit(ImageDraw.Draw(img),text,img.width-40,size)
+    d=ImageDraw.Draw(img); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    for ox,oy,col in [(8,8,(0,0,0,120)),(5,5,(50,0,50,100)),(3,3,(0,0,100,80))]:
+        d.text((x+ox,y+oy),text,font=f,fill=col)
+    d.text((x,y),text,font=f,fill=(255,255,255,255)); return img
+
+def effect_motion_blur(bg, text, size):
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    for i in range(-8,1): d.text((x+i*3,y),text,font=f,fill=(255,255,255,max(0,30+i*25)))
+    d.text((x,y),text,font=f,fill=(255,255,255,255))
+    return Image.alpha_composite(img,tmp)
+
+def effect_radial_blur(bg, text, size):
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    for s in range(5,0,-1):
+        scale=1+s*0.05; ns=int(size*scale)
+        nf=gf(ns); ntw,nth=tbbox(d,text,nf)
+        nx,ny=center_xy(img,ntw,nth)
+        d.text((nx,ny),text,font=nf,fill=(255,255,255,max(0,20-s*3)))
+    d.text((x,y),text,font=f,fill=(255,255,255,255))
+    return Image.alpha_composite(img,tmp)
+
+def effect_depth_of_field(bg, text, size):
+    """Sharp text on a strongly blurred background."""
+    blurred=bg.filter(ImageFilter.GaussianBlur(18))
+    tmp=Image.new("RGBA",blurred.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,blurred.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(blurred,tw,th)
+    d.text((x+2,y+2),text,font=f,fill=(0,0,0,180)); d.text((x,y),text,font=f,fill=(255,255,255,255))
+    return Image.alpha_composite(blurred,tmp)
+
+def effect_floating_text(bg, text, size):
+    """Text with a large blurred shadow to appear floating."""
+    img=bg.copy(); sh=Image.new("RGBA",img.size,(0,0,0,0)); sd=ImageDraw.Draw(sh)
+    f,_=fit(sd,text,img.width-40,size); tw,th=tbbox(sd,text,f); x,y=center_xy(img,tw,th)
+    sd.text((x,y+20),text,font=f,fill=(0,0,0,180))
+    sh=sh.filter(ImageFilter.GaussianBlur(15)); img=Image.alpha_composite(img,sh)
+    ImageDraw.Draw(img).text((x,y-5),text,font=f,fill=(255,255,255,255)); return img
+
+
+# ══════════════════════════════════════════════════════════════════
+#  🧩 DISTORTION & CHAOS
+# ══════════════════════════════════════════════════════════════════
+
+def effect_wave_distortion(bg, text, size):
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    d.text((x,y),text,font=f,fill=(255,255,255,255))
+    arr=pil_to_np(tmp)
+    out=np.zeros_like(arr)
+    for row in range(arr.shape[0]):
+        offset=int(8*math.sin(row*0.15))
+        shifted=np.roll(arr[row],offset,axis=0)
+        out[row]=shifted
+    return Image.alpha_composite(img,np_to_pil(out))
+
+def effect_sinusoidal_warp(bg, text, size):
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    d.text((x,y),text,font=f,fill=(255,120,200,255))
+    arr=pil_to_np(tmp); out=np.zeros_like(arr)
+    for col in range(arr.shape[1]):
+        offset=int(6*math.sin(col*0.1))
+        shifted=np.roll(arr[:,col],offset,axis=0)
+        out[:,col]=shifted
+    return Image.alpha_composite(img,np_to_pil(out))
+
+def effect_glitch_rgb(bg, text, size):
+    """RGB channel split glitch effect."""
+    img=bg.copy()
+    for col,offset in [((255,0,0,180),-5),((0,255,0,180),0),((0,0,255,180),5)]:
+        layer=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(layer)
+        f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+        d.text((x+offset,y),text,font=f,fill=col)
+        img=Image.alpha_composite(img,layer)
+    return img
+
+def effect_scanline_glitch(bg, text, size):
+    img=bg.copy(); tmp,f,x,y,tw,th=text_layer(img,text,size,fill=(0,255,200,255))
+    img=Image.alpha_composite(img,tmp)
+    arr=pil_to_np(img)
+    for row in range(0,img.height,4):
+        arr[row]=arr[row]*0.4
+    for _ in range(6):
+        row=random.randint(0,img.height-3)
+        shift=random.randint(-15,15)
+        arr[row]=np.roll(arr[row],shift,axis=0)
+    return np_to_pil(arr).convert("RGBA")
+
+def effect_pixel_scatter(bg, text, size):
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    d.text((x,y),text,font=f,fill=(255,255,255,255))
+    arr=pil_to_np(tmp)
+    mask=arr[:,:,3]>10
+    coords=np.argwhere(mask)
+    out=np.zeros_like(arr)
+    random.seed(7)
+    for (r,c) in coords:
+        nr=r+random.randint(-8,8); nc=c+random.randint(-8,8)
+        if 0<=nr<arr.shape[0] and 0<=nc<arr.shape[1]:
+            out[nr,nc]=arr[r,c]
+    return Image.alpha_composite(img,np_to_pil(out))
+
+def effect_fragment_explosion(bg, text, size):
+    img=bg.copy(); tmp,f,x,y,tw,th=text_layer(img,text,size,fill=(255,255,255,255))
+    arr=pil_to_np(tmp); out=np.zeros_like(arr)
+    cx2,cy2=x+tw//2,y+th//2; random.seed(3)
+    for r in range(arr.shape[0]):
+        for c in range(arr.shape[1]):
+            if arr[r,c,3]>10:
+                dx=c-cx2; dy=r-cy2; dist=math.sqrt(dx*dx+dy*dy)+1
+                nr=r+int(dy/dist*random.randint(2,12))
+                nc=c+int(dx/dist*random.randint(2,12))
+                if 0<=nr<arr.shape[0] and 0<=nc<arr.shape[1]:
+                    out[nr,nc]=arr[r,c]
+    return Image.alpha_composite(img,np_to_pil(out))
+
+def effect_liquify_melt(bg, text, size):
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    d.text((x,y),text,font=f,fill=(255,255,255,255))
+    arr=pil_to_np(tmp); out=np.zeros_like(arr)
+    for c in range(arr.shape[1]):
+        melt=int(6*math.sin(c*0.2)+random.gauss(0,2))
+        shifted=np.roll(arr[:,c],melt,axis=0)
+        out[:,c]=shifted
+    return Image.alpha_composite(img,np_to_pil(out))
+
+def effect_dripping(bg, text, size):
+    img=bg.copy(); tmp,f,x,y,tw,th=text_layer(img,text,size,fill=(200,0,0,255))
+    img=Image.alpha_composite(img,tmp)
+    d=ImageDraw.Draw(img); random.seed(9)
+    for _ in range(len(text)):
+        dx=random.randint(x,x+tw); dy=y+th; drip_h=random.randint(10,40); w=random.randint(2,5)
+        for dj in range(drip_h):
+            t=dj/drip_h; ww=max(1,int(w*(1-t)))
+            d.ellipse([dx-ww,dy+dj,dx+ww,dy+dj+2],fill=(180,0,0,int(255*(1-t))))
+    return img
+
+def effect_shattered_glass(bg, text, size):
+    img=bg.copy(); tmp,f,x,y,tw,th=text_layer(img,text,size,fill=(200,230,255,220))
+    img=Image.alpha_composite(img,tmp)
+    d=ImageDraw.Draw(img); cx2,cy2=x+tw//2,y+th//2; random.seed(5)
+    for _ in range(12):
+        ex=random.randint(x,x+tw); ey=random.randint(y,y+th)
+        for _ in range(4):
+            ex2=ex+random.randint(-30,30); ey2=ey+random.randint(-30,30)
+            d.line([cx2,cy2,ex2,ey2],fill=(255,255,255,80),width=1)
+    return img
+
+def effect_torn_paper(bg, text, size):
+    img=bg.copy(); d=ImageDraw.Draw(img); f,_=fit(d,text,img.width-40,size)
+    tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th); bh=th+40
+    ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    py=img.height//2-bh//2; pts=[(0,py)]
+    random.seed(11)
+    for xi in range(0,img.width,20):
+        pts.append((xi,py+random.randint(-8,8)))
+    pts+=[( img.width,py),(img.width,py+bh)]
+    for xi in range(img.width,0,-20):
+        pts.append((xi,py+bh+random.randint(-8,8)))
+    pts+=[(0,py+bh)]
+    od.polygon(pts,fill=(240,230,210,220))
+    img=Image.alpha_composite(img,ov)
+    ImageDraw.Draw(img).text((x,img.height//2-th//2),text,font=f,fill=(40,20,0,255)); return img
+
+
+# ══════════════════════════════════════════════════════════════════
+#  🔥 OUTLINE & STRUCTURE
+# ══════════════════════════════════════════════════════════════════
+
+def effect_stroke_outline(bg, text, size):
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f,_=fit(od,text,img.width-40,size); tw,th=tbbox(od,text,f); x,y=center_xy(img,tw,th)
+    for dx in range(-3,4):
+        for dy in range(-3,4):
+            if abs(dx)+abs(dy)<=4: od.text((x+dx,y+dy),text,font=f,fill=(0,0,0,255))
+    od.text((x,y),text,font=f,fill=(255,255,255,255)); return Image.alpha_composite(img,ov)
+
+def effect_double_stroke(bg, text, size):
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f,_=fit(od,text,img.width-40,size); tw,th=tbbox(od,text,f); x,y=center_xy(img,tw,th)
+    for dx in range(-5,6):
+        for dy in range(-5,6):
+            if abs(dx)+abs(dy)<=6: od.text((x+dx,y+dy),text,font=f,fill=(255,200,0,180))
+    for dx in range(-2,3):
+        for dy in range(-2,3):
+            if abs(dx)+abs(dy)<=3: od.text((x+dx,y+dy),text,font=f,fill=(0,0,0,220))
+    od.text((x,y),text,font=f,fill=(255,255,255,255)); return Image.alpha_composite(img,ov)
+
+def effect_dashed_outline(bg, text, size):
+    """Render text as hollow with a dashed outline simulation."""
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f,_=fit(od,text,img.width-40,size); tw,th=tbbox(od,text,f); x,y=center_xy(img,tw,th)
+    for dx in range(-2,3):
+        for dy in range(-2,3):
+            if abs(dx)+abs(dy)<=3: od.text((x+dx,y+dy),text,font=f,fill=(255,255,255,200))
+    od.text((x,y),text,font=f,fill=(0,0,0,255))
+    arr=pil_to_np(ov)
+    for r in range(0,arr.shape[0],3):
+        for c in range(0,arr.shape[1],6):
+            arr[r,c:c+3,3]=arr[r,c:c+3,3]//4
+    return Image.alpha_composite(img,np_to_pil(arr))
+
+def effect_neon_tube(bg, text, size):
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f,_=fit(od,text,img.width-40,size); tw,th=tbbox(od,text,f); x,y=center_xy(img,tw,th)
+    for r in range(6,0,-1):
+        a=int(80*(1-r/6)); od.text((x-r,y-r),text,font=f,fill=(255,50,200,a))
+        od.text((x+r,y+r),text,font=f,fill=(0,200,255,a))
+    od.text((x,y),text,font=f,fill=(255,255,255,255))
+    return Image.alpha_composite(img,ov.filter(ImageFilter.GaussianBlur(1)))
+
+def effect_hollow_text(bg, text, size):
+    """Text outline only — hollow / cut-out style."""
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f,_=fit(od,text,img.width-40,size); tw,th=tbbox(od,text,f); x,y=center_xy(img,tw,th)
+    for dx in range(-2,3):
+        for dy in range(-2,3):
+            if abs(dx)+abs(dy)<=3: od.text((x+dx,y+dy),text,font=f,fill=(255,255,255,220))
+    od.text((x,y),text,font=f,fill=(0,0,0,0))
+    return Image.alpha_composite(img,ov)
+
+def effect_cutout_text(bg, text, size):
+    """Text cut out of a solid overlay, revealing image beneath."""
+    img=bg.copy(); overlay=Image.new("RGBA",img.size,(0,0,50,200))
+    mask=Image.new("L",img.size,255)
+    d=ImageDraw.Draw(mask); f,_=fit(d,text,img.width-40,size)
+    tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    d.text((x,y),text,font=f,fill=0)
+    overlay.putalpha(mask)
+    return Image.alpha_composite(img,overlay)
+
+def effect_inverted_mask(bg, text, size):
+    """Outside text darkened, text area shows original."""
+    img=bg.copy(); overlay=Image.new("RGBA",img.size,(0,0,0,160))
+    mask=Image.new("L",img.size,0); d=ImageDraw.Draw(mask)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    d.text((x,y),text,font=f,fill=255)
+    mask=mask.filter(ImageFilter.GaussianBlur(3)); overlay.putalpha(Image.eval(mask,lambda p:255-p))
+    return Image.alpha_composite(img,overlay)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  🧠 TYPOGRAPHY PLAY
+# ══════════════════════════════════════════════════════════════════
+
+def effect_letter_spacing(bg, text, size):
+    """Extra-wide letter spacing."""
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f=gf(size); spacing=size//2
+    chars=[ch for ch in text]; total_w=sum(tbbox(od,ch,f)[0] for ch in chars)+spacing*(len(chars)-1)
+    x=(img.width-total_w)//2; _,th=tbbox(od,text[0],f); y=(img.height-th)//2
+    for ch in chars:
+        cw,_=tbbox(od,ch,f); od.text((x,y),ch,font=f,fill=(255,255,255,255)); x+=cw+spacing
+    return Image.alpha_composite(img,ov)
+
+def effect_random_kerning(bg, text, size):
+    """Each letter randomly offset horizontally."""
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f=gf(size); _,th=tbbox(od,"A",f); random.seed(13)
+    total_w=tbbox(od,text,f)[0]+len(text)*8
+    x=(img.width-total_w)//2; cy=img.height//2
+    for ch in text:
+        cw,_=tbbox(od,ch,f); y=cy-th//2+random.randint(-size//4,size//4)
+        od.text((x,y),ch,font=f,fill=(255,255,255,255)); x+=cw+random.randint(-4,12)
+    return Image.alpha_composite(img,ov)
+
+def effect_vertical_offset(bg, text, size):
+    """Alternating letters shifted up/down."""
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f=gf(size); tw,th=tbbox(od,text,f); x=(img.width-tw)//2; cy=img.height//2
+    for i,ch in enumerate(text):
+        cw,_=tbbox(od,ch,f); off=(size//4)*(1 if i%2==0 else -1)
+        od.text((x,cy-th//2+off),ch,font=f,fill=(255,255,255,255)); x+=cw
+    return Image.alpha_composite(img,ov)
+
+def effect_bouncing_baseline(bg, text, size):
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f=gf(size); tw,th=tbbox(od,text,f); x=(img.width-tw)//2; cy=img.height//2
+    for i,ch in enumerate(text):
+        cw,_=tbbox(od,ch,f); off=int(math.sin(i*0.9)*size//3)
+        od.text((x,cy-th//2+off),ch,font=f,fill=(255,255,255,255)); x+=cw
+    return Image.alpha_composite(img,ov)
+
+def effect_zigzag_baseline(bg, text, size):
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f=gf(size); tw,th=tbbox(od,text,f); x=(img.width-tw)//2; cy=img.height//2; amp=size//3
+    for i,ch in enumerate(text):
+        cw,_=tbbox(od,ch,f); off=amp*(1 if i%2==0 else -1)
+        h=(i/len(text)); col=(int(255*(1-h)),int(255*h),200,255)
+        od.text((x,cy-th//2+off),ch,font=f,fill=col); x+=cw
+    return Image.alpha_composite(img,ov)
+
+def effect_stacked_letters(bg, text, size):
+    """Each letter printed on top of the next in sequence."""
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f=gf(size); tw,th=tbbox(od,text,f); x,y=center_xy(img,tw,th)
+    for i,ch in enumerate(text):
+        a=int(255*(i+1)/len(text)); od.text((x,y),ch,font=f,fill=(255,255,255,a))
+    return Image.alpha_composite(img,ov)
+
+def effect_overlapping_letters(bg, text, size):
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f=gf(size); _,th=tbbox(od,"A",f); tw=tbbox(od,text,f)[0]
+    x=(img.width-tw)//2; cy=img.height//2; palette=[(255,80,80,160),(80,255,80,160),(80,80,255,160),(255,255,80,160)]
+    for i,ch in enumerate(text):
+        cw,_=tbbox(od,ch,f); col=palette[i%len(palette)]
+        od.text((x,cy-th//2),ch,font=f,fill=col); x+=int(cw*0.6)
+    return Image.alpha_composite(img,ov)
+
+def effect_typewriter(bg, text, size):
+    """Monospace-style with cursor bar at end."""
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f=gf(size); tw,th=tbbox(od,text,f); x,y=center_xy(img,tw,th)
+    od.text((x,y),text,font=f,fill=(180,255,180,255))
+    cw,_=tbbox(od,"_",f)
+    od.rectangle([x+tw+4,y+th-8,x+tw+4+cw,y+th],fill=(180,255,180,255))
+    return Image.alpha_composite(img,ov)
+
+def effect_handwritten_jitter(bg, text, size):
+    """Each letter slightly jittered — handwritten feel."""
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f=gf(size); tw,th=tbbox(od,text,f); x=(img.width-tw)//2; cy=img.height//2; random.seed(17)
+    for ch in text:
+        cw,_=tbbox(od,ch,f)
+        jx=random.randint(-4,4); jy=random.randint(-6,6)
+        od.text((x+jx,cy-th//2+jy),ch,font=f,fill=(255,255,255,220))
+        x+=cw
+    return Image.alpha_composite(img,ov)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  🎭 BACKGROUND INTERACTION
+# ══════════════════════════════════════════════════════════════════
+
+def effect_text_cut_from_image(bg, text, size):
+    """Image visible only through letter shapes."""
+    solid=Image.new("RGBA",bg.size,(20,20,20,240))
+    mask=Image.new("L",bg.size,0); d=ImageDraw.Draw(mask)
+    f,_=fit(d,text,bg.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(bg,tw,th)
+    d.text((x,y),text,font=f,fill=255)
+    solid.putalpha(Image.eval(mask,lambda p:255-p))
+    return Image.alpha_composite(bg.copy(),solid)
+
+def effect_noise_filled(bg, text, size):
+    """Text filled with random noise."""
+    noise=Image.new("RGBA",bg.size)
+    np_noise=np.random.randint(0,255,(bg.height,bg.width,4),dtype=np.uint8); np_noise[:,:,3]=255
+    noise=Image.fromarray(np_noise)
+    mask=Image.new("L",bg.size,0); d=ImageDraw.Draw(mask)
+    f,_=fit(d,text,bg.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(bg,tw,th)
+    d.text((x,y),text,font=f,fill=255)
+    noise.putalpha(mask)
+    return Image.alpha_composite(bg.copy(),noise)
+
+def effect_image_filled_text(bg, text, size):
+    """A different crop of the image fills the text letters."""
+    img=bg.copy()
+    # shift source crop for visual difference
+    shifted=ImageChops.offset(img,img.width//3,img.height//4)
+    mask=Image.new("L",img.size,0); d=ImageDraw.Draw(mask)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    d.text((x,y),text,font=f,fill=255)
+    shifted.putalpha(mask)
+    return Image.alpha_composite(img,shifted)
+
+def effect_water_reflection(bg, text, size):
+    """Text + its wavy reflection below."""
+    img=bg.copy(); tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    y=img.height//3
+    d.text((x,y),text,font=f,fill=(255,255,255,255))
+    # Reflection: flip + wave distort + fade
+    ref=Image.new("RGBA",img.size,(0,0,0,0)); rd=ImageDraw.Draw(ref)
+    rd.text((x,y),text,font=f,fill=(200,230,255,255))
+    ref_flip=ref.transpose(Image.FLIP_TOP_BOTTOM)
+    arr=pil_to_np(ref_flip); out=np.zeros_like(arr)
+    for col in range(arr.shape[1]):
+        wave=int(4*math.sin(col*0.12))
+        shifted=np.roll(arr[:,col],wave,axis=0)
+        out[:,col]=shifted
+    # Fade bottom
+    for row in range(out.shape[0]):
+        t=row/out.shape[0]; out[row,:,3]*=(1-t*0.9)
+    ref2=np_to_pil(out)
+    result=Image.alpha_composite(img,tmp); result=Image.alpha_composite(result,ref2)
+    return result
+
+def effect_shadow_only(bg, text, size):
+    """Only the shadow is visible — no solid text."""
+    img=bg.copy(); sh=Image.new("RGBA",img.size,(0,0,0,0)); sd=ImageDraw.Draw(sh)
+    f,_=fit(sd,text,img.width-40,size); tw,th=tbbox(sd,text,f); x,y=center_xy(img,tw,th)
+    sd.text((x+10,y+10),text,font=f,fill=(0,0,0,180))
+    return Image.alpha_composite(img,sh.filter(ImageFilter.GaussianBlur(12)))
+
+def effect_texture_overlay(bg, text, size):
+    """Text filled with a canvas-like texture."""
+    img=bg.copy(); tex=Image.new("RGBA",img.size)
+    arr=np.zeros((img.height,img.width,4),dtype=np.uint8)
+    for y2 in range(img.height):
+        for x2 in range(img.width):
+            v=int(128+60*math.sin(x2*0.3)*math.cos(y2*0.3))
+            arr[y2,x2]=[v,int(v*0.8),int(v*0.6),255]
+    tex=Image.fromarray(arr)
+    mask=Image.new("L",img.size,0); d=ImageDraw.Draw(mask)
+    f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    d.text((x,y),text,font=f,fill=255)
+    tex.putalpha(mask)
+    return Image.alpha_composite(img,tex)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  🌀 MOTION-INSPIRED
+# ══════════════════════════════════════════════════════════════════
+
+def effect_speed_trail(bg, text, size):
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f,_=fit(od,text,img.width-40,size); tw,th=tbbox(od,text,f); x,y=center_xy(img,tw,th)
+    for i in range(10,0,-1):
+        a=int(25*i); od.text((x-i*6,y),text,font=f,fill=(255,255,255,a))
+    od.text((x,y),text,font=f,fill=(255,255,255,255))
+    return Image.alpha_composite(img,ov)
+
+def effect_echo_trail(bg, text, size):
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f,_=fit(od,text,img.width-40,size); tw,th=tbbox(od,text,f); x,y=center_xy(img,tw,th)
+    for i in range(5,0,-1):
+        a=int(40*i); s=max(12,int(size*(1+i*0.06))); nf=gf(s)
+        ntw,nth=tbbox(od,text,nf); nx,ny=center_xy(img,ntw,nth)
+        od.text((nx,ny),text,font=nf,fill=(100,200,255,a))
+    od.text((x,y),text,font=f,fill=(255,255,255,255))
+    return Image.alpha_composite(img,ov)
+
+def effect_repeated_offset(bg, text, size):
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f,_=fit(od,text,img.width-40,size); tw,th=tbbox(od,text,f); x,y=center_xy(img,tw,th)
+    cols=[(255,80,80,80),(255,200,0,80),(80,255,80,80),(80,80,255,80)]
+    for i,(col) in enumerate(cols):
+        od.text((x+i*5,y+i*3),text,font=f,fill=col)
+    od.text((x,y),text,font=f,fill=(255,255,255,255))
+    return Image.alpha_composite(img,ov)
+
+def effect_smear_drag(bg, text, size):
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f,_=fit(od,text,img.width-40,size); tw,th=tbbox(od,text,f); x,y=center_xy(img,tw,th)
+    for i in range(15):
+        t=i/15; a=int(180*(1-t))
+        od.text((x+int(i*4),y+random.randint(-2,2)),text,font=f,fill=(255,255,255,a))
+    od.text((x,y),text,font=f,fill=(255,255,255,255))
+    return Image.alpha_composite(img,ov.filter(ImageFilter.GaussianBlur(2)))
+
+def effect_zoom_burst(bg, text, size):
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f,_=fit(od,text,img.width-40,size); tw,th=tbbox(od,text,f); x,y=center_xy(img,tw,th)
+    for i in range(6,0,-1):
+        s=int(size*(1+i*0.15)); nf=gf(s); ntw,nth=tbbox(od,text,nf)
+        nx,ny=center_xy(img,ntw,nth); a=int(30*i)
+        od.text((nx,ny),text,font=nf,fill=(255,255,255,a))
+    od.text((x,y),text,font=f,fill=(255,255,255,255))
+    return Image.alpha_composite(img,ov)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  💀 ABSOLUTELY UNHINGED
+# ══════════════════════════════════════════════════════════════════
+
+def effect_fire_burning(bg, text, size):
+    img=bg.copy()
+    for layer,col,blur,oy in [(12,(255,50,0,60),8,8),(8,(255,120,0,100),5,5),(4,(255,200,0,140),3,2)]:
+        tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+        f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+        d.text((x,y-oy),text,font=f,fill=col)
+        tmp=tmp.filter(ImageFilter.GaussianBlur(blur)); img=Image.alpha_composite(img,tmp)
+    d2=ImageDraw.Draw(img); f2,_=fit(d2,text,img.width-40,size)
+    tw,th=tbbox(d2,text,f2); x,y=center_xy(img,tw,th)
+    d2.text((x,y),text,font=f2,fill=(255,240,200,255)); return img
+
+def effect_smoke_rising(bg, text, size):
+    img=bg.copy()
+    for i in range(5):
+        tmp=Image.new("RGBA",img.size,(0,0,0,0)); d=ImageDraw.Draw(tmp)
+        f,_=fit(d,text,img.width-40,size); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+        d.text((x+random.randint(-8,8),y-i*12),text,font=f,fill=(180,180,180,int(60*(1-i/5))))
+        img=Image.alpha_composite(img,tmp.filter(ImageFilter.GaussianBlur(6+i*2)))
+    d2=ImageDraw.Draw(img); f2,_=fit(d2,text,img.width-40,size)
+    tw,th=tbbox(d2,text,f2); x,y=center_xy(img,tw,th)
+    d2.text((x,y),text,font=f2,fill=(220,220,220,255)); return img
+
+def effect_blood_drip(bg, text, size):
+    img=bg.copy(); tmp,f,x,y,tw,th=text_layer(img,text,size,fill=(180,0,0,255))
+    img=Image.alpha_composite(img,tmp); d=ImageDraw.Draw(img); random.seed(21)
+    for _ in range(len(text)*2):
+        dx=random.randint(x,x+tw); drip=random.randint(8,50); w=random.randint(1,4)
+        for dj in range(drip):
+            t=dj/drip; r=max(1,int(w*(1-t*0.6)))
+            d.ellipse([dx-r,y+th+dj,dx+r,y+th+dj+3],fill=(150,0,0,int(255*(1-t))))
+    return img
+
+def effect_cracked_stone(bg, text, size):
+    img=bg.copy(); tmp,f,x,y,tw,th=text_layer(img,text,size,fill=(140,120,100,255))
+    for dx in range(-2,3):
+        for dy in range(-2,3):
+            if abs(dx)+abs(dy)<=3:
+                tl=Image.new("RGBA",img.size,(0,0,0,0)); tld=ImageDraw.Draw(tl)
+                f2,_=fit(tld,text,img.width-40,size); tld.text((x+dx,y+dy),text,font=f2,fill=(80,70,60,180))
+                img=Image.alpha_composite(img,tl)
+    img=Image.alpha_composite(img,tmp)
+    d=ImageDraw.Draw(img); random.seed(33)
+    for _ in range(20):
+        x1=random.randint(x,x+tw); y1=random.randint(y,y+th)
+        x2=x1+random.randint(-15,15); y2=y1+random.randint(-15,15)
+        d.line([x1,y1,x2,y2],fill=(0,0,0,120),width=1)
+    return img
+
+def effect_cyberpunk_hud(bg, text, size):
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f,_=fit(od,text,img.width-40,size); tw,th=tbbox(od,text,f); x,y=center_xy(img,tw,th)
+    pad=8
+    od.rectangle([x-pad,y-pad,x+tw+pad,y+th+pad],outline=(0,255,200,200),width=2)
+    od.line([x-pad-20,y+th//2,x-pad-5,y+th//2],fill=(0,255,200,200),width=2)
+    od.line([x+tw+pad+5,y+th//2,x+tw+pad+20,y+th//2],fill=(0,255,200,200),width=2)
+    od.text((x,y),text,font=f,fill=(0,255,200,255))
+    sf=gf(max(12,size//4))
+    od.text((x-pad,y+th+pad+4),f"SYS:{random.randint(100,999)} | OK",font=sf,fill=(0,200,150,180))
+    return Image.alpha_composite(img,ov)
+
+def effect_matrix_code(bg, text, size):
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    sf=gf(max(12,size//4)); random.seed(99)
+    chars="01アイウエオカキクケコ"
+    for _ in range(200):
+        cx2=random.randint(0,img.width); cy2=random.randint(0,img.height)
+        a=random.randint(30,160)
+        od.text((cx2,cy2),random.choice(chars),font=sf,fill=(0,255,70,a))
+    f,_=fit(od,text,img.width-40,size); tw,th=tbbox(od,text,f); x,y=center_xy(img,tw,th)
+    for dx in range(-2,3):
+        for dy in range(-2,3):
+            if abs(dx)+abs(dy)<=3: od.text((x+dx,y+dy),text,font=f,fill=(0,100,0,200))
+    od.text((x,y),text,font=f,fill=(0,255,70,255))
+    return Image.alpha_composite(img,ov)
+
+def effect_vhs_tape(bg, text, size):
+    img=bg.copy(); arr=pil_to_np(img)
+    for row in range(0,img.height,3): arr[row,:,0]=np.clip(arr[row,:,0]+30,0,255)
+    for row in range(1,img.height,3): arr[row,:,2]=np.clip(arr[row,:,2]+20,0,255)
+    random.seed(55)
+    for _ in range(8):
+        row=random.randint(0,img.height-2); shift=random.randint(-20,20)
+        arr[row]=np.roll(arr[row],shift,axis=0)
+    img=np_to_pil(arr).convert("RGBA")
+    tmp,f,x,y,tw,th=text_layer(img,text,size,fill=(255,240,240,255))
+    return Image.alpha_composite(img,tmp)
+
+def effect_hologram(bg, text, size):
+    img=bg.copy(); ov=Image.new("RGBA",img.size,(0,0,0,0)); od=ImageDraw.Draw(ov)
+    f,_=fit(od,text,img.width-40,size); tw,th=tbbox(od,text,f); x,y=center_xy(img,tw,th)
+    for i in range(0,img.height,4):
+        a=int(15+10*math.sin(i*0.3)); od.line([(0,i),(img.width,i)],fill=(0,200,255,a))
+    for r in range(6,0,-2):
+        od.text((x-r//2,y-r//2),text,font=f,fill=(0,200,255,int(40*(1-r/6))))
+    od.text((x,y),text,font=f,fill=(180,255,255,220))
+    return Image.alpha_composite(img,ov.filter(ImageFilter.GaussianBlur(1)))
+
+def effect_reality_tear(bg, text, size):
+    img=bg.copy()
+    shifted=ImageChops.offset(img,0,40)
+    shifted_arr=pil_to_np(shifted); orig_arr=pil_to_np(img)
+    f,_=fit(ImageDraw.Draw(img),text,img.width-40,size)
+    d=ImageDraw.Draw(img); tw,th=tbbox(d,text,f); x,y=center_xy(img,tw,th)
+    mask=np.zeros((img.height,img.width),dtype=np.float32)
+    for row in range(y-20,y+th+20):
+        if 0<=row<img.height:
+            noise=np.random.rand(img.width)*0.8+0.2; mask[row]=noise
+    blend=orig_arr*(1-mask[:,:,None])+shifted_arr*(mask[:,:,None])
+    result=np_to_pil(blend).convert("RGBA")
+    tmp,_,_,_,_,_=text_layer(result,text,size,fill=(255,80,200,255))
+    return Image.alpha_composite(result,tmp)
+
+def effect_melting_ice(bg, text, size):
+    img=bg.copy(); tmp,f,x,y,tw,th=text_layer(img,text,size,fill=(180,230,255,230))
+    img=Image.alpha_composite(img,tmp); d=ImageDraw.Draw(img); random.seed(44)
+    for _ in range(len(text)+5):
+        dx=random.randint(x,x+tw); drip=random.randint(5,25); w=random.randint(1,3)
+        for dj in range(drip):
+            t=dj/drip; r=max(1,int(w*(1-t)))
+            d.ellipse([dx-r,y+th+dj,dx+r,y+th+dj+2],fill=(180,230,255,int(200*(1-t))))
+    return img
+
+
+# ══════════════════════════════════════════════════════════════════
+#  EFFECTS TABLE — All 115 effects
+# ══════════════════════════════════════════════════════════════════
+EFFECTS = [
+    # ── Original 15
+    ("01_centered",             effect_centered),
+    ("02_bottom_band",          effect_bottom_band),
+    ("03_top_overlay",          effect_top_overlay),
+    ("04_blurred_bg",           effect_blurred_bg),
+    ("05_rotated",              effect_rotated),
+    ("06_tilted_banner",        effect_tilted_banner),
+    ("07_slide_left",           effect_slide_left),
+    ("08_slide_right",          effect_slide_right),
+    ("09_overlap",              effect_overlap),
+    ("10_ghost",                effect_ghost),
+    ("11_scatter",              effect_scatter),
+    ("12_glow",                 effect_glow),
+    ("13_split_panel",          effect_split_panel),
+    ("14_neon_outline",         effect_neon_outline),
+    ("15_color_band",           effect_color_band),
+    # ── Margin & Corner
+    ("16_margin_whisper",       effect_margin_whisper),
+    ("17_corner_stamp",         effect_corner_stamp),
+    # ── Rotation & Perspective
+    ("18_slight_tilt",          effect_slight_tilt),
+    ("19_aggressive_angle",     effect_aggressive_angle),
+    ("20_vertical_stack",       effect_vertical_stack),
+    ("21_diagonal_sweep",       effect_diagonal_sweep),
+    ("22_curved_arc",           effect_curved_arc),
+    ("23_circular_ring",        effect_circular_ring),
+    ("24_spiral",               effect_spiral),
+    ("25_perspective_warp",     effect_perspective_warp),
+    ("26_vanishing_stretch",    effect_vanishing_stretch),
+    ("27_skewed_parallelogram", effect_skewed_parallelogram),
+    # ── Split / Partial
+    ("28_first_letter_highlight",effect_first_letter_highlight),
+    ("29_drop_cap",             effect_drop_cap),
+    ("30_half_blur_sharp",      effect_half_blur_sharp),
+    ("31_top_sharp_bot_blur",   effect_top_sharp_bottom_blur),
+    ("32_left_color_right_mono",effect_left_color_right_mono),
+    ("33_letter_coloring",      effect_letter_coloring),
+    ("34_alternate_opacity",    effect_alternate_opacity),
+    ("35_split_h_color",        effect_split_h_color),
+    ("36_split_v_color",        effect_split_v_color),
+    ("37_masked_reveal",        effect_masked_reveal),
+    # ── Color & Light
+    ("38_gradient_fill",        effect_gradient_fill),
+    ("39_multistop_gradient",   effect_multistop_gradient),
+    ("40_outer_glow",           effect_outer_glow),
+    ("41_inner_glow",           effect_inner_glow),
+    ("42_rainbow_wave",         effect_rainbow_wave),
+    ("43_metallic_gold",        effect_metallic_gold),
+    ("44_chrome",               effect_chrome),
+    ("45_glassmorphism",        effect_glassmorphism),
+    ("46_frosted_ice",          effect_frosted_ice),
+    ("47_fire_edge",            effect_fire_edge),
+    ("48_electric_plasma",      effect_electric_plasma),
+    # ── Blur, Shadow & Depth
+    ("49_soft_shadow",          effect_soft_shadow),
+    ("50_hard_shadow",          effect_hard_shadow),
+    ("51_long_shadow",          effect_long_shadow),
+    ("52_multilayer_shadow",    effect_multilayer_shadow),
+    ("53_motion_blur",          effect_motion_blur),
+    ("54_radial_blur",          effect_radial_blur),
+    ("55_depth_of_field",       effect_depth_of_field),
+    ("56_floating_text",        effect_floating_text),
+    # ── Distortion & Chaos
+    ("57_wave_distortion",      effect_wave_distortion),
+    ("58_sinusoidal_warp",      effect_sinusoidal_warp),
+    ("59_glitch_rgb",           effect_glitch_rgb),
+    ("60_scanline_glitch",      effect_scanline_glitch),
+    ("61_pixel_scatter",        effect_pixel_scatter),
+    ("62_fragment_explosion",   effect_fragment_explosion),
+    ("63_liquify_melt",         effect_liquify_melt),
+    ("64_dripping",             effect_dripping),
+    ("65_shattered_glass",      effect_shattered_glass),
+    ("66_torn_paper",           effect_torn_paper),
+    # ── Outline & Structure
+    ("67_stroke_outline",       effect_stroke_outline),
+    ("68_double_stroke",        effect_double_stroke),
+    ("69_dashed_outline",       effect_dashed_outline),
+    ("70_neon_tube",            effect_neon_tube),
+    ("71_hollow_text",          effect_hollow_text),
+    ("72_cutout_text",          effect_cutout_text),
+    ("73_inverted_mask",        effect_inverted_mask),
+    # ── Typography Play
+    ("74_letter_spacing",       effect_letter_spacing),
+    ("75_random_kerning",       effect_random_kerning),
+    ("76_vertical_offset",      effect_vertical_offset),
+    ("77_bouncing_baseline",    effect_bouncing_baseline),
+    ("78_zigzag_baseline",      effect_zigzag_baseline),
+    ("79_stacked_letters",      effect_stacked_letters),
+    ("80_overlapping_letters",  effect_overlapping_letters),
+    ("81_typewriter",           effect_typewriter),
+    ("82_handwritten_jitter",   effect_handwritten_jitter),
+    # ── Background Interaction
+    ("83_text_cut_from_image",  effect_text_cut_from_image),
+    ("84_noise_filled",         effect_noise_filled),
+    ("85_image_filled_text",    effect_image_filled_text),
+    ("86_water_reflection",     effect_water_reflection),
+    ("87_shadow_only",          effect_shadow_only),
+    ("88_texture_overlay",      effect_texture_overlay),
+    # ── Motion-Inspired
+    ("89_speed_trail",          effect_speed_trail),
+    ("90_echo_trail",           effect_echo_trail),
+    ("91_repeated_offset",      effect_repeated_offset),
+    ("92_smear_drag",           effect_smear_drag),
+    ("93_zoom_burst",           effect_zoom_burst),
+    # ── Absolutely Unhinged
+    ("94_fire_burning",         effect_fire_burning),
+    ("95_smoke_rising",         effect_smoke_rising),
+    ("96_blood_drip",           effect_blood_drip),
+    ("97_cracked_stone",        effect_cracked_stone),
+    ("98_cyberpunk_hud",        effect_cyberpunk_hud),
+    ("99_matrix_code",          effect_matrix_code),
+    ("100_vhs_tape",            effect_vhs_tape),
+    ("101_hologram",            effect_hologram),
+    ("102_reality_tear",        effect_reality_tear),
+    ("103_melting_ice",         effect_melting_ice),
+]
+
+
+# ══════════════════════════════════════════════════════════════════
+#  RUN
+# ══════════════════════════════════════════════════════════════════
+if __name__ == "__main__":
+    try:
+        ImageFont.truetype(FONT_PATH, 50)
+        print(f"✅ Font loaded: {Path(FONT_PATH).name}")
+    except Exception as e:
+        print(f"❌ Font error: {e}\n   Check FONT_PATH = {FONT_PATH!r}"); sys.exit(1)
+
+    img_files=[]
+    for ext in ("*.jpg","*.jpeg","*.png","*.webp","*.JPG","*.PNG"):
+        img_files.extend(IMAGE_DIR.glob(ext))
+
+    if not img_files:
+        print(f"⚠️  No images found in: {IMAGE_DIR}"); sys.exit(1)
+
+    font_label=Path(FONT_PATH).stem
+    print(f"\nFont    : {font_label}")
+    print(f"Images  : {len(img_files)}")
+    print(f"Effects : {len(EFFECTS)}")
+    print(f"Total   : {len(img_files)*len(EFFECTS)} output images\n")
+
+    total=0; errors=0
+    for img_path in img_files:
+        bg=load_image(img_path); stem=img_path.stem
+        out_dir=OUTPUT_DIR/font_label/stem; out_dir.mkdir(parents=True,exist_ok=True)
+        print(f"📷 {img_path.name}  ({bg.width}×{bg.height})")
+        for ename,efn in EFFECTS:
+            try:
+                save(efn(bg,YOUR_TEXT,FONT_SIZE),str(out_dir/f"{ename}.jpg")); total+=1
+            except Exception as e:
+                errors+=1; print(f"   ⚠️  {ename}: {e}")
+        print()
+    print(f"✅ Done! {total} images → {OUTPUT_DIR}/")
+    if errors: print(f"⚠️  {errors} errors skipped.")
